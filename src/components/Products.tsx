@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../AppContext';
-import { Package, Plus, Search, Edit2, Trash2, Barcode, Filter, ChevronDown, Building2, Download, Upload, ShoppingCart } from 'lucide-react';
+import { Package, Plus, Search, X, Edit2, Trash2, Barcode, Filter, ChevronDown, Building2, Download, Upload, ShoppingCart } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, SaleType, ComboItem } from '../types';
@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase';
 export const Products = () => {
   const { products, currentBranch, branches, categories, addProduct, updateProduct, deleteProduct } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
+  const [comboSearch, setComboSearch] = useState(''); // Estado para buscar productos del combo
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,9 +53,9 @@ export const Products = () => {
   });
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.barcode.includes(searchTerm) ||
-    p.brand.toLowerCase().includes(searchTerm.toLowerCase())
+    (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (p.barcode || '').includes(searchTerm) ||
+    (p.brand?.toLowerCase() || '').includes(searchTerm.toLowerCase())
   );
 
   const handleDelete = async (id: string) => {
@@ -732,23 +733,92 @@ export const Products = () => {
 
                     {formData.isCombo && (
                       <div className="space-y-4 pt-2 border-t border-purple-100">
+                        {/* Buscador de productos para el combo */}
                         <div className="relative">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
-                          <select
-                            onChange={(e) => {
-                              const product = products.find(p => p.id === e.target.value);
-                              if (product) handleAddComboItem(product);
-                              e.target.value = "";
-                            }}
-                            className="w-full pl-10 pr-4 py-3 bg-white border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium"
-                          >
-                            <option value="">Buscar producto para agregar al combo...</option>
-                            {products
-                              .filter(p => !p.isCombo && p.id !== editingProduct?.id)
-                              .map(p => (
-                                <option key={p.id} value={p.id}>{p.name} ({p.brand})</option>
-                              ))}
-                          </select>
+                          <div className="relative group">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 group-focus-within:text-purple-600 transition-colors w-4 h-4" />
+                            <input
+                              type="text"
+                              placeholder="Escribe para buscar productos..."
+                              className="w-full pl-10 pr-4 py-3 bg-white border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium placeholder:text-zinc-400 transition-all"
+                              value={comboSearch}
+                              onChange={(e) => setComboSearch(e.target.value)}
+                            />
+                            {comboSearch && (
+                              <button 
+                                onClick={() => setComboSearch('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-zinc-100 rounded-full text-zinc-400"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Lista de resultados filtrados */}
+                          <AnimatePresence>
+                            {comboSearch && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="absolute z-20 left-0 right-0 mt-2 bg-white rounded-xl border border-zinc-200 shadow-2xl overflow-hidden max-h-64 flex flex-col"
+                              >
+                                <div className="overflow-y-auto custom-scrollbar">
+                                  {products
+                                    .filter(p => !p.isCombo && p.id !== editingProduct?.id)
+                                    .filter(p => 
+                                      (p.name?.toLowerCase() || '').includes(comboSearch.toLowerCase()) || 
+                                      (p.brand?.toLowerCase() || '').includes(comboSearch.toLowerCase()) ||
+                                      (p.barcode || '').includes(comboSearch)
+                                    )
+                                    .slice(0, 10)
+                                    .map(p => (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        onClick={() => {
+                                          handleAddComboItem(p);
+                                          setComboSearch('');
+                                        }}
+                                        className="w-full flex items-center gap-3 p-3 hover:bg-purple-50 transition-colors text-left border-b border-zinc-50 last:border-0"
+                                      >
+                                        <div className="w-10 h-10 bg-zinc-100 rounded-lg flex items-center justify-center overflow-hidden shrink-0 border border-zinc-50">
+                                          {p.imageUrl ? (
+                                            <img src={p.imageUrl} alt="" className="w-full h-full object-contain p-1" />
+                                          ) : (
+                                            <Package className="w-4 h-4 text-zinc-400" />
+                                          )}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-sm font-black text-zinc-800 truncate uppercase leading-tight">
+                                            {p.name}
+                                          </p>
+                                          <div className="flex items-center gap-2 mt-0.5">
+                                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">
+                                              {p.brand || 'SIN MARCA'}
+                                            </span>
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-zinc-100 rounded font-bold text-zinc-500">
+                                              {formatCurrency(p.price || 0)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  
+                                  {products.filter(p => !p.isCombo && p.id !== editingProduct?.id && (
+                                      (p.name?.toLowerCase() || '').includes(comboSearch.toLowerCase()) || 
+                                      (p.brand?.toLowerCase() || '').includes(comboSearch.toLowerCase()) ||
+                                      (p.barcode || '').includes(comboSearch)
+                                    )).length === 0 && (
+                                    <div className="p-8 text-center text-zinc-400">
+                                      <Search className="w-8 h-8 opacity-20 mx-auto mb-2" />
+                                      <p className="text-xs font-bold uppercase tracking-widest">Sin resultados</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
 
                         {formData.comboItems.length > 0 ? (
@@ -756,31 +826,74 @@ export const Products = () => {
                             {formData.comboItems.map(item => {
                               const component = products.find(p => p.id === item.componentProductId);
                               return (
-                                <div key={item.id} className="flex items-center gap-3 p-3 bg-white rounded-xl border border-purple-100 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
-                                  <div className="w-8 h-8 bg-zinc-50 rounded-lg flex items-center justify-center border border-zinc-100 shrink-0">
-                                    <Package className="w-4 h-4 text-zinc-400" />
+                                <div key={item.id} className="flex flex-col gap-2 p-3 bg-white rounded-xl border border-purple-100 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-zinc-50 rounded-lg flex items-center justify-center border border-zinc-100 shrink-0">
+                                      <Package className="w-4 h-4 text-zinc-400" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-sm font-bold text-zinc-800 block truncate">{component?.name || 'Producto Desconocido'}</span>
+                                      <span className="text-[10px] text-zinc-500">{component?.brand}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-3 py-1 bg-zinc-50 rounded-lg border border-zinc-100">
+                                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Cantidad:</span>
+                                      <input 
+                                        type="number" 
+                                        value={item.quantity} 
+                                        onChange={(e) => updateComboQuantity(item.componentProductId, parseFloat(e.target.value) || 0)}
+                                        className="w-12 bg-transparent text-sm font-black text-center focus:outline-none"
+                                        min="1"
+                                        step="1"
+                                      />
+                                    </div>
+                                    <button 
+                                      onClick={() => removeComboItem(item.componentProductId)}
+                                      className="p-1.5 text-zinc-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
                                   </div>
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-sm font-bold text-zinc-800 block truncate">{component?.name || 'Producto Desconocido'}</span>
-                                    <span className="text-[10px] text-zinc-500">{component?.brand}</span>
+
+                                  {/* Toggle: el cajero elige este componente en el POS */}
+                                  <div className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all ${item.isSelectable ? 'bg-amber-50 border-amber-200' : 'bg-zinc-50 border-zinc-100'}`}>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        className="w-4 h-4 rounded border-zinc-300 text-amber-500 focus:ring-amber-400"
+                                        checked={!!item.isSelectable}
+                                        onChange={(e) => setFormData({
+                                          ...formData,
+                                          comboItems: formData.comboItems.map(ci =>
+                                            ci.componentProductId === item.componentProductId
+                                              ? { ...ci, isSelectable: e.target.checked, selectableCategory: e.target.checked ? (ci.selectableCategory || component?.category || '') : undefined }
+                                              : ci
+                                          )
+                                        })}
+                                      />
+                                      <span className="text-[11px] font-bold text-zinc-600 uppercase tracking-wide">
+                                        Cajero elige este producto en el POS
+                                      </span>
+                                    </label>
+                                    {item.isSelectable && (
+                                      <select
+                                        className="ml-2 text-xs font-bold bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 text-zinc-700"
+                                        value={item.selectableCategory || ''}
+                                        onChange={(e) => setFormData({
+                                          ...formData,
+                                          comboItems: formData.comboItems.map(ci =>
+                                            ci.componentProductId === item.componentProductId
+                                              ? { ...ci, selectableCategory: e.target.value }
+                                              : ci
+                                          )
+                                        })}
+                                      >
+                                        <option value="">Categoría a mostrar...</option>
+                                        {categories.map(cat => (
+                                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                        ))}
+                                      </select>
+                                    )}
                                   </div>
-                                  <div className="flex items-center gap-2 px-3 py-1 bg-zinc-50 rounded-lg border border-zinc-100">
-                                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Cantidad:</span>
-                                    <input 
-                                      type="number" 
-                                      value={item.quantity} 
-                                      onChange={(e) => updateComboQuantity(item.componentProductId, parseFloat(e.target.value) || 0)}
-                                      className="w-12 bg-transparent text-sm font-black text-center focus:outline-none"
-                                      min="1"
-                                      step="1"
-                                    />
-                                  </div>
-                                  <button 
-                                    onClick={() => removeComboItem(item.componentProductId)}
-                                    className="p-1.5 text-zinc-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
                                 </div>
                               );
                             })}

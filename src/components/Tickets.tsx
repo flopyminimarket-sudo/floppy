@@ -341,12 +341,16 @@ export const Tickets = () => {
       {/* Ticket Details Modal */}
       <AnimatePresence>
         {selectedTicket && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div 
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+              onClick={() => setSelectedTicket(null)}
+            >
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-white rounded-[14px] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
               <div className="p-6 border-b border-zinc-100 bg-zinc-50 flex justify-between items-start shrink-0">
@@ -430,7 +434,7 @@ export const Tickets = () => {
                     <div>
                       <h4 className="font-bold text-rose-900">Ticket Anulado</h4>
                       <p className="text-sm text-rose-700 font-medium">Motivo: {selectedTicket.voidReason}</p>
-                      <p className="text-xs text-rose-600 mt-1">Fecha de anulación: {new Date(selectedTicket.voidDate!).toLocaleString('es-ES')}</p>
+                      <p className="text-xs text-rose-600 mt-1">Fecha de anulación: {selectedTicket.voidDate ? new Date(selectedTicket.voidDate).toLocaleString('es-ES') : ''}</p>
                     </div>
                   </div>
                 )}
@@ -438,25 +442,25 @@ export const Tickets = () => {
                 {/* Items */}
                 <h3 className="text-lg font-bold text-zinc-900 mb-4">Productos Comprados</h3>
                 <div className="space-y-3">
-                  {selectedTicket.items.map((item, index) => (
-                    <div key={`${item.id}-${index}`} className="flex items-center gap-4 p-4 bg-white border border-zinc-100 rounded-[14px] shadow-sm">
+                  {selectedTicket.items && selectedTicket.items.map((item, index) => (
+                    <div key={`${item?.id || index}-${index}`} className="flex items-center gap-4 p-4 bg-white border border-zinc-100 rounded-[14px] shadow-sm">
                       <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
-                        {item.imageUrl ? (
-                          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
+                        {item?.imageUrl ? (
+                          <img src={item.imageUrl} alt={item?.name || 'Producto'} className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
                         ) : (
                           <Package className="w-6 h-6 text-slate-300" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-zinc-900 truncate">{item.name}</h4>
-                        <p className="text-sm text-zinc-500">{item.brand} • {item.barcode}</p>
+                        <h4 className="font-bold text-zinc-900 truncate">{item?.name || 'Producto sin nombre'}</h4>
+                        <p className="text-sm text-zinc-500">{item?.brand || ''} {item?.barcode ? `• ${item.barcode}` : ''}</p>
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-sm text-zinc-500 mb-0.5">
-                          {item.quantity} {item.saleType === 'weight' ? 'kg' : 'u'} x {formatCurrency(item.offerPrice || item.price)}
+                          {item?.quantity || 0} {item?.saleType === 'weight' ? 'kg' : 'u'} x {formatCurrency(item?.offerPrice || item?.price || 0)}
                         </p>
                         <p className="font-bold text-zinc-900">
-                          {formatCurrency(Math.round((item.offerPrice || item.price) * item.quantity))}
+                          {formatCurrency(Math.round((item?.offerPrice || item?.price || 0) * (item?.quantity || 0)))}
                         </p>
                       </div>
                     </div>
@@ -468,14 +472,14 @@ export const Tickets = () => {
               <div className="p-6 bg-zinc-50 border-t border-zinc-100 shrink-0 flex flex-col gap-4">
                 <div className="flex justify-between items-center w-full">
                   <div className="text-zinc-500 font-medium">
-                    Total de artículos: <span className="font-bold text-zinc-900">{selectedTicket.items.reduce((acc, item) => acc + item.quantity, 0)}</span>
+                    Total de artículos: <span className="font-bold text-zinc-900">{selectedTicket.items ? selectedTicket.items.reduce((acc, item) => acc + (item?.quantity || 0), 0) : 0}</span>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-zinc-500 uppercase mb-1">Total Pagado</p>
                     <p className={cn(
                       "text-4xl font-black leading-none",
                       selectedTicket.status === 'voided' ? "text-zinc-400 line-through" : "text-blue-600"
-                    )}>{formatCurrency(selectedTicket.total)}</p>
+                    )}>{formatCurrency(selectedTicket.total || 0)}</p>
                   </div>
                 </div>
                 

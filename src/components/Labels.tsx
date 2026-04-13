@@ -24,8 +24,8 @@ export const Labels = () => {
   const [labelItems, setLabelItems] = useState<LabelItem[]>([]);
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.barcode.includes(searchTerm)
+    (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
+    (p.barcode || '').includes(searchTerm)
   );
 
   const addLabelItem = (product: any) => {

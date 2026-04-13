@@ -52,8 +52,10 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
     sale.paymentMethod === 'card' ? 'TARJETA' :
     'TRANSFERENCIA';
 
-  const totalDiscount = sale.items.reduce((acc: number, item: any) => {
-    return acc + Math.round((item.price - (item.offerPrice || item.price)) * item.quantity);
+  const totalDiscount = (sale.items || []).reduce((acc: number, item: any) => {
+    const listPrice = item?.price || 0;
+    const salePrice = item?.offerPrice || item?.price || 0;
+    return acc + Math.round((listPrice - salePrice) * (item?.quantity || 0));
   }, 0);
 
   return (
@@ -68,7 +70,7 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
       {/* ── HEADER ── */}
       <div style={{ textAlign: 'center', marginBottom: '3mm' }}>
         <div style={{ ...bold, fontSize: '15pt', letterSpacing: '1px' }}>
-          {companySettings.name.toUpperCase()}
+          {(companySettings.name || 'Empresa').toUpperCase()}
         </div>
         {companySettings.slogan && (
           <div style={bold}>{companySettings.slogan}</div>
@@ -86,8 +88,8 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
       {/* ── SALE INFO ── */}
       <div style={{ marginBottom: '2mm' }}>
         <div><span style={bold}>FECHA:</span> <span style={bold}>{new Date(sale.date).toLocaleString('es-CL')}</span></div>
-        <div><span style={bold}>N° TICKET:</span> <span style={bold}>{sale.id?.slice(0, 8).toUpperCase() || 'N/A'}</span></div>
-        <div><span style={bold}>CAJERO:</span> <span style={bold}>{(sale.cashierName || sale.cashierId?.slice(0, 8) || 'N/A').toUpperCase()}</span></div>
+        <div><span style={bold}>N° TICKET:</span> <span style={bold}>{(sale.id ? sale.id.slice(0, 8) : 'N/A').toUpperCase()}</span></div>
+        <div><span style={bold}>CAJERO:</span> <span style={bold}>{(sale.cashierName || (sale.cashierId ? sale.cashierId.slice(0, 8) : 'N/A')).toUpperCase()}</span></div>
         <div><span style={bold}>PAGO:</span> <span style={bold}>{paymentLabel}</span></div>
       </div>
 
@@ -102,24 +104,25 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
       <Divider />
 
       {/* ── ITEMS ── */}
-      {sale.items.map((item: any, i: number) => {
-        const unitPrice = item.price;
-        const discount = unitPrice - (item.offerPrice || item.price);
-        const qtyLabel = item.saleType === 'weight'
-          ? `${item.quantity.toFixed(3)} kg`
-          : `${item.quantity}`;
-        const lineTotal = Math.round(unitPrice * item.quantity);
-        const lineDiscount = Math.round(discount * item.quantity);
+      {(sale.items || []).map((item: any, i: number) => {
+        const unitPrice = item?.price || 0;
+        const finalPrice = item?.offerPrice || item?.price || 0;
+        const discount = unitPrice - finalPrice;
+        const qtyLabel = item?.saleType === 'weight'
+          ? `${(item?.quantity || 0).toFixed(3)} kg`
+          : `${item?.quantity || 0}`;
+        const lineTotal = Math.round(finalPrice * (item?.quantity || 0));
+        const lineDiscount = Math.round(discount * (item?.quantity || 0));
 
         return (
-          <div key={i} style={{ marginBottom: '2.5mm' }}>
+          <div key={`${item?.id || i}-${i}`} style={{ marginBottom: '2.5mm' }}>
             {/* Name */}
             <div style={{ ...bold, wordBreak: 'break-word', fontSize: '11pt' }}>
-              {item.name.toUpperCase()}
+              {(item?.name || 'PRODUCTO').toUpperCase()}
             </div>
 
             {/* Kitchen note */}
-            {item.notes && (
+            {item?.notes && (
               <div style={{ fontSize: '9.5pt', fontStyle: 'italic', paddingLeft: '2mm', ...bold }}>
                 * {item.notes}
               </div>
@@ -127,18 +130,16 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
 
             {/* Qty × price → line total */}
             <PriceRow
-              label={<span style={bold}>  {qtyLabel} x {formatCurrency(unitPrice)}</span>}
+              label={<span style={bold}>  {qtyLabel} x {formatCurrency(finalPrice)}</span>}
               price={formatCurrency(lineTotal)}
               priceStyle={bold}
             />
 
-            {/* Discount */}
+            {/* Discount note if applicable */}
             {lineDiscount > 0 && (
-              <PriceRow
-                label={<span style={bold}>  Descuento:</span>}
-                price={`-${formatCurrency(lineDiscount)}`}
-                priceStyle={bold}
-              />
+              <div style={{ fontSize: '9pt', fontStyle: 'italic', paddingLeft: '4mm', ...bold, color: '#333' }}>
+                (Dcto: -{formatCurrency(lineDiscount)})
+              </div>
             )}
           </div>
         );
@@ -151,7 +152,7 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
         <>
           <PriceRow
             label="Subtotal:"
-            price={formatCurrency(Math.round(sale.total + totalDiscount))}
+            price={formatCurrency(Math.round((sale.total || 0) + totalDiscount))}
           />
           <PriceRow
             label="Descuentos:"
@@ -163,7 +164,7 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
       {/* ── TOTAL ── */}
       <PriceRow
         label={<span style={{ ...bold, fontSize: '13pt' }}>TOTAL:</span>}
-        price={formatCurrency(Math.round(sale.total))}
+        price={formatCurrency(Math.round(sale.total || 0))}
         labelStyle={{ fontSize: '13pt' }}
         priceStyle={{ ...bold, fontSize: '13pt' }}
       />

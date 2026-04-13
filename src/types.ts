@@ -7,6 +7,7 @@ export interface Branch {
   name: string;
   address: string;
   phone: string;
+  auto_print_ticket?: boolean;
 }
 
 export interface User {
@@ -53,6 +54,10 @@ export interface ComboItem {
   comboProductId: string;
   componentProductId: string;
   quantity: number;
+  /** Si es true, el cajero debe elegir un producto de la categoría especificada */
+  isSelectable?: boolean;
+  /** Categoría de productos a mostrar en el modal de selección */
+  selectableCategory?: string;
 }
 
 export type PromotionType = 'buy_x_get_y' | 'scheduled_discount';

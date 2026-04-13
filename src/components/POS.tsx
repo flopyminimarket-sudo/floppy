@@ -1,21 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../AppContext';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun, Layers } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { printer } from '../lib/bluetoothPrinter';
 import { PrintTicket } from './PrintTicket';
 import toast from 'react-hot-toast';
+import { Product } from '../types';
 
 export const POS = () => {
   const { products, cart, addToCart, removeFromCart, updateCartQuantity, clearCart, updateCartNotes, processSale, currentBranch, branches, setCurrentBranch, companySettings, getActivePromotion, isDarkMode, toggleDarkMode } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [allowFlexibleSearch, setAllowFlexibleSearch] = useState(false);
   const barcodeRef = useRef<HTMLInputElement>(null);
   
   // Printer state
   const [isPrinterConnected, setIsPrinterConnected] = useState(false);
-  const [autoPrint, setAutoPrint] = useState(true);
+  const [autoPrint, setAutoPrint] = useState(currentBranch?.auto_print_ticket ?? true);
+
+
+  // Sync autoPrint with branch settings when branch changes
+  useEffect(() => {
+    setAutoPrint(currentBranch?.auto_print_ticket ?? false);
+  }, [currentBranch?.id, currentBranch?.auto_print_ticket]);
+
+  // --- Estado del modal de selección de componente de combo ---
+  const [comboSelectionModal, setComboSelectionModal] = useState<{
+    combo: Product;
+    selectableItem: { quantity: number; category: string; label: string };
+    searchFilter: string;
+  } | null>(null);
 
   // Handle barcode scanning
   useEffect(() => {
@@ -40,16 +55,27 @@ export const POS = () => {
     const cleanInput = barcodeInput.trim();
     if (!cleanInput) return;
 
-    const product = products.find(p => {
+    // First try exact barcode match
+    let product = products.find(p => {
       const internalBarcode = generateBarcode(p.id);
       return p.barcode?.trim() === cleanInput || (!p.barcode && internalBarcode === cleanInput.toUpperCase());
     });
+
+    // If not found and flexible search is enabled, try by name
+    if (!product && allowFlexibleSearch) {
+      product = products.find(p => 
+        p.name?.toLowerCase().includes(cleanInput.toLowerCase()) ||
+        p.brand?.toLowerCase().includes(cleanInput.toLowerCase())
+      );
+    }
 
     if (product) {
       handleProductClick(product); // Route through handleProductClick to support weight products properly
       setBarcodeInput('');
     } else {
-      // toast.error('Producto no encontrado');
+      if (allowFlexibleSearch) {
+        toast.error('No se encontró ningún producto con ese nombre');
+      }
       setBarcodeInput('');
     }
   };
@@ -70,13 +96,67 @@ export const POS = () => {
         toast.error(`Sin stock disponible para "${product.name}"`);
         return;
       }
-      // Apply scheduled discount promo price if active
+
+      // Aplicar precio de promoción si aplica
       const promo = getActivePromotion(product.id);
       const productWithPromo = (promo?.type === 'scheduled_discount' && promo.discountPrice)
         ? { ...product, offerPrice: promo.discountPrice }
         : product;
+
+      // --- Si es combo con componente seleccionable, abrir modal ---
+      if (product.isCombo && product.comboItems?.length > 0) {
+        const selectableItem = product.comboItems.find((ci: any) => ci.isSelectable && ci.selectableCategory);
+        if (selectableItem) {
+          setComboSelectionModal({
+            combo: productWithPromo,
+            selectableItem: {
+              quantity: selectableItem.quantity,
+              category: selectableItem.selectableCategory!,
+              label: selectableItem.selectableCategory!
+            },
+            searchFilter: ''
+          });
+          return; // Esperar selección del cajero
+        }
+      }
+
       addToCart(productWithPromo);
     }
+  };
+
+  /** Confirma la selección del cajero: agrega el combo + el componente elegido */
+  const handleComboComponentSelected = (selectedProduct: Product) => {
+    if (!comboSelectionModal) return;
+    const { combo, selectableItem } = comboSelectionModal;
+
+    // Verificar stock del producto elegido
+    const availableStock = selectedProduct.stock?.[currentBranch?.id ?? ''] ?? 0;
+    if (!selectedProduct.allowNegativeStock && availableStock < selectableItem.quantity) {
+      toast.error(`Sin stock suficiente de "${selectedProduct.name}"`);
+      return;
+    }
+
+    // Agregar el combo normalmente (addToCart ya maneja los componentes fijos)
+    addToCart(combo);
+
+    // Agregar el componente seleccionado manualmente con precio $0
+    // Usamos setCart directamente a través de addToCart con precio sobreescrito
+    // Para esto necesitamos pasar el producto modificado
+    const componentAsCartItem = {
+      ...selectedProduct,
+      price: 0,
+      offerPrice: undefined,
+      isComboComponent: true,
+      parentComboId: combo.id
+    } as any;
+
+    // Llamamos addToCart pero como el precio es 0 la validación de stock se hace aquí
+    // Necesitamos inyectarlo directamente, lo hacemos con un hack controlado:
+    // addToCart con precio forzado a 0 — para esto modificamos el producto temporal
+    addToCart(componentAsCartItem, selectableItem.quantity);
+
+    setComboSelectionModal(null);
+    toast.success(`Combo ${combo.name} con ${selectedProduct.name} agregado`);
   };
 
   const handleWeightSubmit = (e: React.FormEvent) => {
@@ -162,9 +242,21 @@ export const POS = () => {
   };
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.barcode.includes(searchTerm)
+    (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (p.barcode || '').includes(searchTerm)
   );
+
+  // Productos del modal filtrados por categoría y término de búsqueda
+  const comboModalProducts = comboSelectionModal
+    ? products.filter(p => {
+        const matchCategory = p.category?.toLowerCase() === comboSelectionModal.selectableItem.category.toLowerCase();
+        const hasStock = p.allowNegativeStock || (p.stock?.[currentBranch?.id ?? ''] ?? 0) > 0;
+        const matchSearch = comboSelectionModal.searchFilter
+          ? (p.name?.toLowerCase() || '').includes(comboSelectionModal.searchFilter.toLowerCase())
+          : true;
+        return matchCategory && hasStock && matchSearch;
+      })
+    : [];
 
   const total = Math.round(cart.reduce((acc, item) => acc + (Math.round(item.offerPrice || item.price) * item.quantity), 0));
 
@@ -240,17 +332,28 @@ export const POS = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <form onSubmit={handleBarcodeSubmit} className="relative w-72">
-              <Barcode className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5" />
-              <input
-                ref={barcodeRef}
-                type="text"
-                placeholder="Escanear código..."
-                className="w-full pl-12 pr-4 py-4 bg-white border border-zinc-200 rounded-[14px] shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium"
-                value={barcodeInput}
-                onChange={(e) => setBarcodeInput(e.target.value)}
-              />
-            </form>
+            <div className="flex items-center gap-2">
+              <form onSubmit={handleBarcodeSubmit} className="relative w-72">
+                <Barcode className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5" />
+                <input
+                  ref={barcodeRef}
+                  type="text"
+                  placeholder="Escanear código..."
+                  className="w-full pl-12 pr-4 py-4 bg-white border border-zinc-200 rounded-[14px] shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                />
+              </form>
+              <label className="flex items-center gap-2 cursor-pointer bg-white border border-zinc-200 px-4 py-4 rounded-[14px] shadow-sm hover:bg-zinc-50 transition-colors shrink-0">
+                <input 
+                  type="checkbox" 
+                  className="w-4 h-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                  checked={allowFlexibleSearch}
+                  onChange={(e) => setAllowFlexibleSearch(e.target.checked)}
+                />
+                <span className="text-xs font-black text-zinc-500 uppercase whitespace-nowrap">Permitir sin código</span>
+              </label>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-4 overflow-y-auto pr-2 custom-scrollbar pb-6">
@@ -514,6 +617,127 @@ export const POS = () => {
           </div>
         </div>
       </div>
+
+      {/* ─── Modal: Selección de Componente de Combo (ej: Bebida) ─── */}
+      <AnimatePresence>
+        {comboSelectionModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-900/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-zinc-100 dark:border-zinc-800 flex flex-col max-h-[85vh]"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-gradient-to-r from-blue-600 to-blue-500 text-white shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black uppercase tracking-tight">
+                        Elige la {comboSelectionModal.selectableItem.label}
+                      </h3>
+                      <p className="text-blue-100 text-xs font-bold mt-0.5">
+                        Combo: {comboSelectionModal.combo.name} · Cantidad: {comboSelectionModal.selectableItem.quantity}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setComboSelectionModal(null)}
+                    className="p-2 hover:bg-white/20 rounded-xl transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Búsqueda dentro del modal */}
+                <div className="relative mt-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-200" />
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder={`Buscar ${comboSelectionModal.selectableItem.label.toLowerCase()}...`}
+                    className="w-full pl-10 pr-4 py-2.5 bg-white/15 border border-white/20 rounded-xl text-white placeholder:text-blue-200 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-white/40"
+                    value={comboSelectionModal.searchFilter}
+                    onChange={(e) => setComboSelectionModal(prev => prev ? { ...prev, searchFilter: e.target.value } : null)}
+                  />
+                </div>
+              </div>
+
+              {/* Grid de productos */}
+              <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+                {comboModalProducts.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-zinc-400 gap-3">
+                    <ShoppingCart className="w-12 h-12 opacity-30" />
+                    <p className="font-bold text-sm">
+                      No hay {comboSelectionModal.selectableItem.label.toLowerCase()}s disponibles con stock
+                    </p>
+                    <p className="text-xs text-center text-zinc-400">
+                      Verifica que existan productos en la categoría "{comboSelectionModal.selectableItem.category}" con stock mayor a 0.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {comboModalProducts.map(product => {
+                      const stock = product.stock?.[currentBranch?.id ?? ''] ?? 0;
+                      return (
+                        <motion.button
+                          key={product.id}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => handleComboComponentSelected(product)}
+                          className="flex flex-col bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 text-left group overflow-hidden"
+                        >
+                          {/* Imagen */}
+                          <div className="h-28 w-full bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden border-b border-zinc-100 dark:border-zinc-700 relative">
+                            {product.imageUrl ? (
+                              <img
+                                src={product.imageUrl}
+                                alt={product.name}
+                                className="w-full h-full object-contain p-3 group-hover:scale-105 transition-transform duration-300"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <Package className="w-10 h-10 text-zinc-300 dark:text-zinc-600" />
+                            )}
+                            {/* Badge de stock */}
+                            <span className="absolute top-2 right-2 text-[10px] font-black bg-emerald-500 text-white px-1.5 py-0.5 rounded-lg">
+                              {stock} u
+                            </span>
+                          </div>
+                          {/* Info */}
+                          <div className="p-3">
+                            <p className="text-xs font-black text-zinc-800 dark:text-zinc-100 leading-tight uppercase line-clamp-2">
+                              {product.name}
+                            </p>
+                            <p className="text-[10px] text-zinc-400 font-bold mt-0.5 uppercase">
+                              {product.brand || 'Sin marca'}
+                            </p>
+                            <div className="mt-2 py-1.5 bg-blue-600 group-hover:bg-blue-700 text-white text-[11px] font-black text-center rounded-lg uppercase tracking-wide transition-colors">
+                              Elegir
+                            </div>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 shrink-0">
+                <button
+                  onClick={() => setComboSelectionModal(null)}
+                  className="w-full py-3 bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl font-black text-sm uppercase hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Weight Input Modal */}
       <AnimatePresence>

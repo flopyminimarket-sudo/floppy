@@ -201,8 +201,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           
         if (productsError) throw productsError;
 
+        let loadedProducts: Product[] = [];
         if (productsData) {
-          const formattedProducts: Product[] = productsData.map(p => {
+          loadedProducts = productsData.map(p => {
             const branchData: Record<string, { price: number; offerPrice?: number; stock: number }> = {};
             const stockRecord: Record<string, number> = {};
             
@@ -242,7 +243,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 id: ci.id,
                 comboProductId: ci.combo_product_id,
                 componentProductId: ci.component_product_id,
-                quantity: ci.quantity
+                quantity: ci.quantity,
+                isSelectable: ci.is_selectable || false,
+                selectableCategory: ci.selectable_category || undefined
               })) || [],
               branchData,
               price: currentData.price,
@@ -250,7 +253,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               stock: stockRecord
             };
           });
-          setProducts(formattedProducts);
+          setProducts(loadedProducts);
         }
 
         // Fetch promotions
@@ -299,11 +302,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             voidReason: s.void_reason,
             voidDate: s.void_date,
             items: s.sale_items?.map((item: any) => {
-              const product = products.find(p => p.id === item.product_id);
+              const product = loadedProducts.find(p => p.id === item.product_id);
               return {
                 ...product,
-                quantity: item.quantity,
-                price: item.price
+                id: item.product_id || (product?.id || 'deleted'),
+                name: item.name || (product?.name || 'PRODUCTO ELIMINADO'),
+                barcode: item.barcode || (product?.barcode || 'N/A'),
+                brand: item.brand || (product?.brand || ''),
+                quantity: item.quantity || 0,
+                price: item.price || 0,
+                saleType: item.sale_type || (product?.sale_type || 'unit'),
+                imageUrl: product?.imageUrl // La imagen es lo único que dependemos del producto actual
               } as CartItem;
             }) || []
           }));
@@ -340,42 +349,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentBranch, currentUser]);
 
   const addToCart = (product: Product, quantity: number = 1) => {
+    // --- Caso especial: componente ya marcado desde el modal de selección del POS ---
+    if ((product as any).isComboComponent) {
+      const parentComboId = (product as any).parentComboId;
+      setCart(prev => {
+        const existingComp = prev.find(
+          item => item.id === product.id && (item as any).isComboComponent && (item as any).parentComboId === parentComboId
+        );
+        if (existingComp) {
+          return prev.map(item =>
+            (item.id === product.id && (item as any).isComboComponent && (item as any).parentComboId === parentComboId)
+              ? { ...item, quantity: item.quantity + quantity }
+              : item
+          );
+        }
+        return [...prev, {
+          ...product,
+          price: 0,
+          offerPrice: undefined,
+          quantity,
+          isComboComponent: true,
+          parentComboId
+        } as any];
+      });
+      // No mostrar toast aquí — lo hace handleComboComponentSelected en el POS
+      return;
+    }
+
+    // --- Validación de stock de componentes para combos ---
+    if (product.isCombo && product.comboItems && product.comboItems.length > 0 && currentBranch) {
+      for (const comboItem of product.comboItems) {
+        // Saltar componentes "seleccionables" — el cajero los elige en el modal del POS
+        if (comboItem.isSelectable) continue;
+
+        const component = products.find(p => p.id === comboItem.componentProductId);
+        if (!component) {
+          toast.error(`Componente del combo no encontrado`);
+          return;
+        }
+        const requiredQty = comboItem.quantity * quantity;
+        const availableStock = component.stock[currentBranch.id] ?? 0;
+        // También considerar el stock ya reservado en el carrito para este componente
+        const reservedInCart = cart
+          .filter(item => item.id === component.id && (item as any).isComboComponent)
+          .reduce((acc, item) => acc + item.quantity, 0);
+        if (!component.allowNegativeStock && (availableStock - reservedInCart) < requiredQty) {
+          toast.error(`Stock insuficiente de "${component.name}" para el combo`);
+          return;
+        }
+      }
+    }
+
     setCart(prev => {
       let newCart = [...prev];
       
-      // Add the combo/product itself
-      const existing = newCart.find(item => item.id === product.id);
+      // Añadir el combo/producto principal
+      const existing = newCart.find(item => item.id === product.id && !(item as any).isComboComponent);
       if (existing) {
         newCart = newCart.map(item =>
-          item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item
+          (item.id === product.id && !(item as any).isComboComponent)
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
         );
       } else {
         newCart.push({ ...product, quantity });
       }
 
-      // If it's a combo, ADD ITS COMPONENTS to the cart with same quantity (if multiplier > 1)
-      // but with $0 price to avoid breaking the total, and with a specific flag?
-      // Actually, if we want stock deduction for components, we must have them in the cart
-      // or handle it in processSale. If we add them to the cart with $0, processSale will deduct them.
+      // Si es combo, añadir componentes FIJOS (no seleccionables) con precio $0
       if (product.isCombo && product.comboItems && product.comboItems.length > 0) {
-        product.comboItems.forEach(comboItem => {
-          const component = products.find(p => p.id === comboItem.componentProductId);
-          if (component) {
-            const compQuantity = comboItem.quantity * quantity;
-            // Map component so it has $0 price (already included in combo)
-            const cartComponent = { ...component, price: 0, offerPrice: undefined, quantity: compQuantity };
-            
-            // Check if already in cart (maybe as a component of another combo)
-            const existingComp = newCart.find(item => item.id === component.id && item.price === 0);
-            if (existingComp) {
-              newCart = newCart.map(item => 
-                (item.id === component.id && item.price === 0) ? { ...item, quantity: item.quantity + compQuantity } : item
+        product.comboItems
+          .filter(comboItem => !comboItem.isSelectable) // Omitir los que el cajero elige
+          .forEach(comboItem => {
+            const component = products.find(p => p.id === comboItem.componentProductId);
+            if (component) {
+              const compQuantity = comboItem.quantity * quantity;
+              const existingComp = newCart.find(
+                item => item.id === component.id && (item as any).isComboComponent && (item as any).parentComboId === product.id
               );
-            } else {
-              newCart.push(cartComponent);
+              if (existingComp) {
+                newCart = newCart.map(item =>
+                  (item.id === component.id && (item as any).isComboComponent && (item as any).parentComboId === product.id)
+                    ? { ...item, quantity: item.quantity + compQuantity }
+                    : item
+                );
+              } else {
+                newCart.push({
+                  ...component,
+                  price: 0,
+                  offerPrice: undefined,
+                  quantity: compQuantity,
+                  isComboComponent: true,
+                  parentComboId: product.id
+                } as any);
+              }
             }
-          }
-        });
+          });
       }
 
       return newCart;
@@ -384,7 +452,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(item => item.id !== productId));
+    setCart(prev => {
+      // Verificar si el producto que se elimina es un combo padre
+      const itemToRemove = prev.find(item => item.id === productId && !(item as any).isComboComponent);
+      if (itemToRemove && (itemToRemove as any).isCombo) {
+        // Eliminar el combo y todos sus componentes vinculados
+        return prev.filter(item => 
+          !(item.id === productId && !(item as any).isComboComponent) &&
+          !((item as any).isComboComponent && (item as any).parentComboId === productId)
+        );
+      }
+      return prev.filter(item => item.id !== productId);
+    });
   };
 
   const updateCartQuantity = (productId: string, quantity: number) => {
@@ -392,9 +471,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       removeFromCart(productId);
       return;
     }
-    setCart(prev => prev.map(item =>
-      item.id === productId ? { ...item, quantity } : item
-    ));
+    setCart(prev => {
+      const itemToUpdate = prev.find(item => item.id === productId && !(item as any).isComboComponent);
+      
+      // Si es un combo, actualizar también la cantidad de sus componentes proporcionalmente
+      if (itemToUpdate && (itemToUpdate as any).isCombo && itemToUpdate.comboItems?.length) {
+        const oldQty = itemToUpdate.quantity;
+        const factor = quantity / oldQty;
+        return prev.map(item => {
+          if (item.id === productId && !(item as any).isComboComponent) {
+            return { ...item, quantity };
+          }
+          // Actualizar componentes vinculados a este combo
+          if ((item as any).isComboComponent && (item as any).parentComboId === productId) {
+            return { ...item, quantity: Math.round(item.quantity * factor) };
+          }
+          return item;
+        });
+      }
+
+      return prev.map(item =>
+        item.id === productId ? { ...item, quantity } : item
+      );
+    });
   };
 
   const clearCart = () => setCart([]);
@@ -407,13 +506,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       if (cart.length === 0) return null;
 
-      const totalValue = cart.reduce((acc, item) => {
+      // Separar ítems principales de componentes de combo
+      const mainItems = cart.filter(item => !(item as any).isComboComponent);
+      const comboComponents = cart.filter(item => (item as any).isComboComponent);
+
+      // Calcular total solo con ítems principales (los componentes van en $0)
+      const totalValue = mainItems.reduce((acc, item) => {
         const price = item.offerPrice || item.price;
         return acc + (Math.round(price) * item.quantity);
       }, 0);
-      
       const total = Math.round(totalValue);
 
+      // --- 1. Insertar la venta ---
       const { data: saleData, error: saleError } = await supabase
         .from('sales')
         .insert({
@@ -427,11 +531,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (saleError) throw saleError;
 
-      // 2. Create Sale Items
+      // --- 2. Registrar todos los ítems de la venta (incluyendo componentes de combo con precio $0) ---
       const saleItems = cart.map(item => ({
         sale_id: saleData.id,
         product_id: item.id,
+        name: item.name,
+        barcode: item.barcode,
+        brand: item.brand,
         quantity: item.quantity,
+        sale_type: item.saleType,
         price: Math.round(item.offerPrice || item.price),
         subtotal: Math.round((item.offerPrice || item.price) * item.quantity)
       }));
@@ -439,64 +547,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
 
-      // 3. Update Stock & Record Movements
-      for (const item of cart) {
-        // Update stock
+      // --- 3. Actualizar stock ---
+      // Construir mapa de descuentos de stock: productId -> totalQtyToDeduct
+      // Los combos (isCombo=true) NO descuentan su propio stock; solo sus componentes lo hacen.
+      // Los productos normales y componentes de combo sí descuentan su stock.
+      const stockDeductions: Record<string, number> = {};
+
+      for (const item of mainItems) {
+        if (!(item as any).isCombo) {
+          // Producto normal: descontar stock
+          stockDeductions[item.id] = (stockDeductions[item.id] || 0) + item.quantity;
+        }
+        // Los combos (isCombo=true) ya tienen sus componentes en el carrito; no descontamos el combo en sí
+      }
+
+      // Componentes de combo: siempre descontar stock
+      for (const item of comboComponents) {
+        stockDeductions[item.id] = (stockDeductions[item.id] || 0) + item.quantity;
+      }
+
+      // Aplicar descuentos de stock en paralelo
+      const stockUpdatePromises = Object.entries(stockDeductions).map(async ([productId, qtyToDeduct]) => {
         const { data: currentStockData } = await supabase
           .from('product_stock')
           .select('quantity, price, offer_price')
-          .eq('product_id', item.id)
-          .eq('branch_id', currentBranch.id)
+          .eq('product_id', productId)
+          .eq('branch_id', currentBranch!.id)
           .single();
 
         const currentStock = currentStockData?.quantity || 0;
+        const newStock = currentStock - qtyToDeduct;
 
         await supabase
           .from('product_stock')
           .upsert({
-            product_id: item.id,
-            branch_id: currentBranch.id,
-            quantity: currentStock - item.quantity,
+            product_id: productId,
+            branch_id: currentBranch!.id,
+            quantity: newStock,
             price: currentStockData?.price,
             offer_price: currentStockData?.offer_price
           }, { onConflict: 'product_id,branch_id' });
 
-        // Record movement
         await supabase
           .from('inventory_movements')
           .insert({
-            product_id: item.id,
+            product_id: productId,
             type: 'out',
-            quantity: item.quantity,
-            reason: `Venta POS ${saleData.id}`,
-            user_id: currentUser.id,
-            branch_id: currentBranch.id
+            quantity: qtyToDeduct,
+            reason: `Venta POS #${saleData.id}`,
+            user_id: currentUser!.id,
+            branch_id: currentBranch!.id
           });
-      }
+      });
 
-      // Update local state
+      await Promise.all(stockUpdatePromises);
+
+      // --- 4. Actualizar estado local ---
       const newSale: Sale = {
         id: saleData.id,
         date: saleData.date,
         items: [...cart],
         total,
         paymentMethod,
-        cashierId: currentUser.id,
-        cashierName: currentUser.name,
-        branchId: currentBranch.id,
+        cashierId: currentUser!.id,
+        cashierName: currentUser!.name,
+        branchId: currentBranch!.id,
         status: 'completed'
       };
 
       setSales(prev => [newSale, ...prev]);
-      
+
       setProducts(prev => prev.map(p => {
-        const cartItem = cart.find(item => item.id === p.id);
-        if (cartItem) {
-          return { 
-            ...p, 
+        const deduction = stockDeductions[p.id];
+        if (deduction) {
+          return {
+            ...p,
             stock: {
               ...p.stock,
-              [currentBranch.id]: (p.stock[currentBranch.id] || 0) - cartItem.quantity 
+              [currentBranch!.id]: (p.stock[currentBranch!.id] || 0) - deduction
             }
           };
         }
@@ -525,7 +653,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // 1. Update Sale Status in Supabase
+      // 1. Actualizar estado de la venta
       const { error: voidError } = await supabase
         .from('sales')
         .update({
@@ -537,55 +665,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (voidError) throw voidError;
 
-      // 2. Restore Stock & Record Movements
+      // 2. Restaurar stock siguiendo la misma lógica de processSale:
+      //    - Solo restaurar ítems normales y componentes de combo (isComboComponent).
+      //    - No restaurar combos (isCombo=true) porque su stock nunca fue descontado.
+      const stockRestorations: Record<string, number> = {};
+
       for (const item of saleToVoid.items) {
-        // Get current stock
+        const isComboProduct = (item as any).isCombo;
+        const isComponent = (item as any).isComboComponent;
+
+        if (!isComboProduct) {
+          // Producto normal o componente de combo: restaurar stock
+          stockRestorations[item.id] = (stockRestorations[item.id] || 0) + item.quantity;
+        }
+        // Los combos padre (isCombo=true) no restauran inventario
+      }
+
+      // Aplicar restauraciones en paralelo
+      const restorePromises = Object.entries(stockRestorations).map(async ([productId, qtyToRestore]) => {
         const { data: currentStockData } = await supabase
           .from('product_stock')
           .select('quantity, price, offer_price')
-          .eq('product_id', item.id)
+          .eq('product_id', productId)
           .eq('branch_id', currentBranch.id)
           .single();
 
         const currentStock = currentStockData?.quantity || 0;
 
-        // Restore stock
         await supabase
           .from('product_stock')
           .upsert({
-            product_id: item.id,
+            product_id: productId,
             branch_id: currentBranch.id,
-            quantity: currentStock + item.quantity,
+            quantity: currentStock + qtyToRestore,
             price: currentStockData?.price,
             offer_price: currentStockData?.offer_price
           }, { onConflict: 'product_id,branch_id' });
 
-        // Record movement
         await supabase
           .from('inventory_movements')
           .insert({
-            product_id: item.id,
+            product_id: productId,
             type: 'in',
-            quantity: item.quantity,
-            reason: `Anulación Venta ${saleId}: ${reason}`,
+            quantity: qtyToRestore,
+            reason: `Anulación Venta #${saleId}: ${reason}`,
             user_id: currentUser.id,
             branch_id: currentBranch.id
           });
-      }
+      });
 
-      // 3. Update local state
-      setSales(prev => prev.map(s => 
+      await Promise.all(restorePromises);
+
+      // 3. Actualizar estado local
+      setSales(prev => prev.map(s =>
         s.id === saleId ? { ...s, status: 'voided', voidReason: reason, voidDate: new Date().toISOString() } : s
       ));
 
       setProducts(prev => prev.map(p => {
-        const saleItem = saleToVoid.items.find(item => item.id === p.id);
-        if (saleItem) {
+        const restoration = stockRestorations[p.id];
+        if (restoration) {
           return {
             ...p,
             stock: {
               ...p.stock,
-              [currentBranch.id]: (p.stock[currentBranch.id] || 0) + saleItem.quantity
+              [currentBranch.id]: (p.stock[currentBranch.id] || 0) + restoration
             }
           };
         }
@@ -837,7 +980,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: product.name,
           brand: product.brand,
           description: product.description,
-          barcode: product.barcode,
+          barcode: product.barcode === '' ? null : product.barcode,
           sale_type: product.saleType,
           category: product.category,
           image_url: product.imageUrl,
@@ -874,7 +1017,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const comboInserts = product.comboItems.map(item => ({
           combo_product_id: data.id,
           component_product_id: item.componentProductId,
-          quantity: item.quantity
+          quantity: item.quantity,
+          is_selectable: item.isSelectable || false,
+          selectable_category: item.selectableCategory || null
         }));
         await supabase.from('combo_items').insert(comboInserts);
       }
@@ -907,7 +1052,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (updates.name !== undefined) dbUpdates.name = updates.name;
       if (updates.brand !== undefined) dbUpdates.brand = updates.brand;
       if (updates.description !== undefined) dbUpdates.description = updates.description;
-      if (updates.barcode !== undefined) dbUpdates.barcode = updates.barcode;
+      if (updates.barcode !== undefined) dbUpdates.barcode = updates.barcode === '' ? null : updates.barcode;
       if (updates.saleType !== undefined) dbUpdates.sale_type = updates.saleType;
       if (updates.category !== undefined) dbUpdates.category = updates.category;
       if (updates.imageUrl !== undefined) dbUpdates.image_url = updates.imageUrl;
@@ -964,7 +1109,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const comboInserts = comboToUse.map(item => ({
             combo_product_id: id,
             component_product_id: item.componentProductId,
-            quantity: item.quantity
+            quantity: item.quantity,
+            is_selectable: item.isSelectable || false,
+            selectable_category: item.selectableCategory || null
           }));
           await supabase.from('combo_items').insert(comboInserts);
         }

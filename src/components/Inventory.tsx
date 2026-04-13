@@ -130,6 +130,7 @@ export const Inventory = () => {
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [modalSearchTerm, setModalSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [activeModal, setActiveModal] = useState<ModalType>(null);
 
@@ -151,9 +152,14 @@ export const Inventory = () => {
     setReason('');
     setToBranchId('');
     setRedirectToNew(null);
+    setModalSearchTerm('');
   };
 
-  const closeModal = () => { setActiveModal(null); setRedirectToNew(null); };
+  const closeModal = () => { 
+    setActiveModal(null); 
+    setRedirectToNew(null);
+    setModalSearchTerm('');
+  };
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
   const currentStock = selectedProduct?.stock?.[currentBranch?.id ?? ''] ?? 0;
@@ -352,7 +358,7 @@ export const Inventory = () => {
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
               {products
-                .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.brand?.toLowerCase().includes(searchTerm.toLowerCase()))
+                .filter(p => (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || (p.brand?.toLowerCase() || '').includes(searchTerm.toLowerCase()))
                 .map(p => {
                   const stock = p.stock?.[currentBranch?.id ?? ''] ?? 0;
                   return (
@@ -415,17 +421,38 @@ export const Inventory = () => {
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-px bg-zinc-200" /><span className="text-xs font-bold text-zinc-400">o busca en lista</span><div className="flex-1 h-px bg-zinc-200" />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
-                      <select value={selectedProductId}
-                        onChange={e => handleProductSelect(e.target.value)}
-                        className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500">
-                        <option value="">Seleccionar producto…</option>
-                        {products.filter(p => (p.stock?.[currentBranch?.id ?? ''] ?? 0) > 0).map(p => (
-                          <option key={p.id} value={p.id}>{p.name} — Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0}</option>
-                        ))}
-                      </select>
+                    <div className="space-y-4 pt-2">
+                       <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre o marca..."
+                          className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          value={modalSearchTerm}
+                          onChange={e => setModalSearchTerm(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
+                        <select value={selectedProductId}
+                          onChange={e => handleProductSelect(e.target.value)}
+                          className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500">
+                          <option value="">Seleccionar producto…</option>
+                          {products
+                            .filter(p => (p.stock?.[currentBranch?.id ?? ''] ?? 0) > 0)
+                            .filter(p => !modalSearchTerm || 
+                              p.name?.toLowerCase().includes(modalSearchTerm.toLowerCase()) || 
+                              p.brand?.toLowerCase().includes(modalSearchTerm.toLowerCase()) ||
+                              p.barcode?.includes(modalSearchTerm)
+                            )
+                            .map(p => (
+                            <option key={p.id} value={p.id}>{p.name} {p.brand ? `— ${p.brand}` : ''} (Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0})</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
+
                     {selectedProduct && (
                       <div className="bg-purple-50 rounded-[14px] px-4 py-3 text-sm flex items-center gap-3">
                         {selectedProduct.imageUrl && <img src={selectedProduct.imageUrl} alt="" className="w-10 h-10 rounded-xl object-cover" />}
@@ -481,15 +508,34 @@ export const Inventory = () => {
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-px bg-zinc-200" /><span className="text-xs font-bold text-zinc-400">o busca en lista</span><div className="flex-1 h-px bg-zinc-200" />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
-                      <select value={selectedProductId} onChange={e => handleProductSelect(e.target.value)}
-                        className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500">
-                        <option value="">Seleccionar producto…</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>{p.name} — Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0}</option>
-                        ))}
-                      </select>
+                    <div className="space-y-4 pt-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre o marca..."
+                          className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          value={modalSearchTerm}
+                          onChange={e => setModalSearchTerm(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
+                        <select value={selectedProductId} onChange={e => handleProductSelect(e.target.value)}
+                          className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500">
+                          <option value="">Seleccionar producto…</option>
+                          {products
+                            .filter(p => !modalSearchTerm || 
+                              p.name?.toLowerCase().includes(modalSearchTerm.toLowerCase()) || 
+                              p.brand?.toLowerCase().includes(modalSearchTerm.toLowerCase()) ||
+                              p.barcode?.includes(modalSearchTerm)
+                            )
+                            .map(p => (
+                            <option key={p.id} value={p.id}>{p.name} {p.brand ? `— ${p.brand}` : ''} (Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0})</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     {selectedProduct ? (
                       <div className="grid grid-cols-2 gap-3">
@@ -553,17 +599,36 @@ export const Inventory = () => {
                       <div className="flex-1 h-px bg-zinc-200" />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
-                      <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}
-                        className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">Seleccionar producto…</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.brand ? `— ${p.brand}` : ''} (Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0})
-                          </option>
-                        ))}
-                      </select>
+                    <div className="space-y-4 pt-2">
+                       <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre o marca..."
+                          className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={modalSearchTerm}
+                          onChange={e => setModalSearchTerm(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Producto</label>
+                        <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}
+                          className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">Seleccionar producto…</option>
+                          {products
+                            .filter(p => !modalSearchTerm || 
+                              p.name?.toLowerCase().includes(modalSearchTerm.toLowerCase()) || 
+                              p.brand?.toLowerCase().includes(modalSearchTerm.toLowerCase()) ||
+                              p.barcode?.includes(modalSearchTerm)
+                            )
+                            .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.brand ? `— ${p.brand}` : ''} (Stock: {p.stock?.[currentBranch?.id ?? ''] ?? 0})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     {/* Selected product preview */}

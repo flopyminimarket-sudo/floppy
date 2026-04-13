@@ -13,7 +13,8 @@ export const Branches = () => {
   const [formData, setFormData] = useState({
     name: '',
     address: '',
-    phone: ''
+    phone: '',
+    auto_print_ticket: false
   });
 
   const handleOpenModal = (branch?: any) => {
@@ -22,11 +23,12 @@ export const Branches = () => {
       setFormData({
         name: branch.name,
         address: branch.address,
-        phone: branch.phone
+        phone: branch.phone,
+        auto_print_ticket: branch.auto_print_ticket || false
       });
     } else {
       setEditingBranch(null);
-      setFormData({ name: '', address: '', phone: '' });
+      setFormData({ name: '', address: '', phone: '', auto_print_ticket: false });
     }
     setIsModalOpen(true);
   };
@@ -136,6 +138,10 @@ export const Branches = () => {
                 <Phone className="w-4 h-4 text-zinc-400" />
                 {branch.phone}
               </div>
+              <div className="flex items-center gap-3 text-sm text-zinc-600">
+                <div className={`w-2 h-2 rounded-full ${branch.auto_print_ticket ? 'bg-green-500' : 'bg-zinc-300'}`} />
+                {branch.auto_print_ticket ? 'Impresión automática activada' : 'Sin impresión automática'}
+              </div>
             </div>
 
             <div className="mt-6 pt-6 border-t border-zinc-50 flex justify-end gap-2">
@@ -204,6 +210,22 @@ export const Branches = () => {
                     className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" 
                     placeholder="Ej: +56 9 1234 5678" 
                   />
+                </div>
+                
+                <div className="flex items-center justify-between p-4 bg-zinc-50 border border-zinc-100 rounded-xl">
+                  <div>
+                    <h3 className="font-bold text-zinc-900">Impresión Automática</h3>
+                    <p className="text-xs text-zinc-500">Imprimir ticket automáticamente al completar venta</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={formData.auto_print_ticket}
+                      onChange={e => setFormData({...formData, auto_print_ticket: e.target.checked})}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
                 </div>
                 
                 <div className="flex justify-end gap-3 pt-4">

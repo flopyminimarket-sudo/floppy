@@ -42,12 +42,18 @@ export const Users = () => {
     if (confirm('¿Estás seguro de eliminar este usuario?')) {
       try {
         const { error } = await supabase.from('users').delete().eq('id', id);
-        if (error) throw error;
+        if (error) {
+          if (error.code === '23503') {
+            toast.error('No se puede eliminar porque este usuario ya tiene historial de ventas o inventario asociado.');
+            return;
+          }
+          throw error;
+        }
         setUsers(prev => prev.filter(u => u.id !== id));
         toast.success('Usuario eliminado');
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error deleting user:', error);
-        toast.error('Error al eliminar el usuario');
+        toast.error('Error al eliminar el usuario: ' + (error.message || 'Error desconocido'));
       }
     }
   };
