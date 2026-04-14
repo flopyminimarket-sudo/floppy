@@ -117,238 +117,263 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const fetchInitialData = async () => {
+    if (!isConfigured) return;
+    try {
+      setIsLoading(true);
+      
+      // Fetch company settings first
+      const { data: settingsData } = await supabase
+        .from('company_settings')
+        .select('*')
+        .eq('id', 'current')
+        .single();
+      
+      if (settingsData) {
+        const { id, ...cleanSettings } = settingsData;
+        setCompanySettingsState(cleanSettings as CompanySettings);
+      }
+
+      const { data: branchesData, error: branchesError } = await supabase.from('branches').select('*');
+      if (branchesError) throw branchesError;
+      setBranches(branchesData || []);
+      
+      const { data: suppliersData } = await supabase.from('suppliers').select('*');
+      if (suppliersData) setSuppliers(suppliersData);
+
+      const { data: categoriesData } = await supabase.from('categories').select('*');
+      if (categoriesData) setCategories(categoriesData);
+
+      const { data: usersData } = await supabase.from('users').select('*');
+      if (usersData) {
+        setUsers(usersData.map(u => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          branchIds: u.branch_ids || (u.branch_id ? [u.branch_id] : []),
+          avatar: u.avatar
+        })));
+      }
+
+    } catch (error) {
+      console.error('Error fetching initial data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchBranchData = async () => {
+    if (!currentBranch || !currentUser || !isConfigured) return;
+
+    try {
+      // Fetch products with their stock and branch-specific prices
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select(`
+          *,
+          product_stock (
+            branch_id,
+            quantity,
+            price,
+            offer_price
+          ),
+          combo_items!combo_product_id (
+            id,
+            combo_product_id,
+            component_product_id,
+            quantity,
+            is_selectable,
+            selectable_category
+          )
+        `);
+        
+      if (productsError) throw productsError;
+
+      let loadedProducts: Product[] = [];
+      if (productsData) {
+        loadedProducts = productsData.map(p => {
+          const branchData: Record<string, { price: number; offerPrice?: number; stock: number }> = {};
+          const stockRecord: Record<string, number> = {};
+          
+          p.product_stock?.forEach((item: any) => {
+            branchData[item.branch_id] = {
+              price: item.price || p.price,
+              offerPrice: item.offer_price || p.offer_price,
+              stock: item.quantity
+            };
+            stockRecord[item.branch_id] = item.quantity;
+          });
+          
+          // Current branch data
+          const currentData = branchData[currentBranch.id] || { 
+            price: p.price, 
+            offerPrice: p.offer_price, 
+            stock: 0 
+          };
+
+          return {
+            id: p.id,
+            name: p.name,
+            brand: p.brand,
+            description: p.description,
+            barcode: p.barcode,
+            saleType: p.sale_type,
+            category: p.category,
+            imageUrl: p.image_url,
+            expiryDate: p.expiry_date,
+            isPack: p.is_pack,
+            pack_units: p.pack_units,
+            supplierId: p.supplier_id,
+            allowNegativeStock: p.allow_negative_stock || false,
+            isCombo: p.is_combo || false,
+            minStock: p.min_stock || 5,
+            comboItems: (p.combo_items || []).map((ci: any) => ({
+              id: ci.id,
+              comboProductId: ci.combo_product_id,
+              componentProductId: ci.component_product_id,
+              quantity: ci.quantity,
+              isSelectable: ci.is_selectable || false,
+              selectableCategory: ci.selectable_category || undefined
+            })) || [],
+            branchData,
+            price: currentData.price,
+            offerPrice: currentData.offerPrice,
+            stock: stockRecord
+          };
+        });
+        setProducts(loadedProducts);
+      }
+
+      // Fetch promotions
+      const { data: promoData } = await supabase
+        .from('promotions')
+        .select('*')
+        .eq('is_active', true);
+
+      if (promoData) {
+        setPromotions(promoData.map((pr: any): Promotion => ({
+          id: pr.id,
+          name: pr.name,
+          type: pr.type,
+          productId: pr.product_id,
+          buyQuantity: pr.buy_quantity,
+          getQuantity: pr.get_quantity,
+          discountPrice: pr.discount_price,
+          startDate: pr.start_date,
+          endDate: pr.end_date,
+          startTime: pr.start_time,
+          endTime: pr.end_time,
+          daysOfWeek: pr.days_of_week,
+          isActive: pr.is_active
+        })));
+      }
+
+      // Fetch sales
+      const { data: salesData } = await supabase
+        .from('sales')
+        .select(`
+          *,
+          sale_items (*)
+        `)
+        .eq('branch_id', currentBranch.id)
+        .order('date', { ascending: false });
+
+      if (salesData) {
+        const formattedSales: Sale[] = salesData.map(s => ({
+          id: s.id,
+          date: s.date,
+          total: s.total,
+          paymentMethod: s.payment_method,
+          cashierId: s.cashier_id,
+          branchId: s.branch_id,
+          status: s.status || 'completed',
+          voidReason: s.void_reason,
+          voidDate: s.void_date,
+          items: s.sale_items?.map((item: any) => {
+            const product = loadedProducts.find(p => p.id === item.product_id);
+            return {
+              ...product,
+              id: item.product_id || (product?.id || 'deleted'),
+              name: item.name || (product?.name || 'PRODUCTO ELIMINADO'),
+              barcode: item.barcode || (product?.barcode || 'N/A'),
+              brand: item.brand || (product?.brand || ''),
+              quantity: item.quantity || 0,
+              price: item.price || 0,
+              saleType: item.sale_type || (product?.sale_type || 'unit'),
+              imageUrl: product?.imageUrl
+            } as CartItem;
+          }) || []
+        }));
+        setSales(formattedSales);
+      }
+
+      const { data: movementsData } = await supabase
+        .from('inventory_movements')
+        .select('*')
+        .or(`branch_id.eq.${currentBranch.id},to_branch_id.eq.${currentBranch.id}`)
+        .order('date', { ascending: false });
+
+      if (movementsData) {
+        const formattedMovements: InventoryMovement[] = movementsData.map(m => ({
+          id: m.id,
+          productId: m.product_id,
+          type: m.type,
+          quantity: m.quantity,
+          date: m.created_at || m.date,
+          reason: m.reason,
+          userId: m.user_id,
+          branchId: m.branch_id,
+          toBranchId: m.to_branch_id
+        }));
+        setMovements(formattedMovements);
+      }
+
+    } catch (error) {
+      console.error('Error fetching branch data:', error);
+    }
+  };
+
   // Fetch initial data
   useEffect(() => {
-    if (!isConfigured) {
-      setIsLoading(false);
-      return;
-    }
-
-    const fetchInitialData = async () => {
-      try {
-        setIsLoading(true);
-        
-        // Fetch company settings first
-        const { data: settingsData } = await supabase
-          .from('company_settings')
-          .select('*')
-          .eq('id', 'current')
-          .single();
-        
-        if (settingsData) {
-          const { id, ...cleanSettings } = settingsData;
-          setCompanySettingsState(cleanSettings as CompanySettings);
-        }
-
-        const { data: branchesData, error: branchesError } = await supabase.from('branches').select('*');
-        if (branchesError) throw branchesError;
-        setBranches(branchesData || []);
-        
-        // We only fetch products, sales, etc. when a user logs in, or we can fetch them here if we want.
-        // For now, let's fetch global data
-        const { data: suppliersData } = await supabase.from('suppliers').select('*');
-        if (suppliersData) setSuppliers(suppliersData);
-
-        const { data: categoriesData } = await supabase.from('categories').select('*');
-        if (categoriesData) setCategories(categoriesData);
-
-        const { data: usersData } = await supabase.from('users').select('*');
-        if (usersData) {
-          setUsers(usersData.map(u => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            branchIds: u.branch_ids || (u.branch_id ? [u.branch_id] : []),
-            avatar: u.avatar
-          })));
-        }
-
-      } catch (error) {
-        console.error('Error fetching initial data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchInitialData();
-  }, []);
+  }, [isConfigured]);
 
   // Fetch branch-specific data when branch changes
   useEffect(() => {
-    if (!currentBranch || !currentUser || !isConfigured) return;
-
-    const fetchBranchData = async () => {
-      try {
-        // Fetch products with their stock and branch-specific prices
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select(`
-            *,
-            product_stock (
-              branch_id,
-              quantity,
-              price,
-              offer_price
-            ),
-            combo_items!combo_product_id (
-              id,
-              combo_product_id,
-              component_product_id,
-              quantity,
-              is_selectable,
-              selectable_category
-            )
-          `);
-          
-        if (productsError) throw productsError;
-
-        let loadedProducts: Product[] = [];
-        if (productsData) {
-          loadedProducts = productsData.map(p => {
-            const branchData: Record<string, { price: number; offerPrice?: number; stock: number }> = {};
-            const stockRecord: Record<string, number> = {};
-            
-            p.product_stock?.forEach((item: any) => {
-              branchData[item.branch_id] = {
-                price: item.price || p.price,
-                offerPrice: item.offer_price || p.offer_price,
-                stock: item.quantity
-              };
-              stockRecord[item.branch_id] = item.quantity;
-            });
-            
-            // Current branch data
-            const currentData = branchData[currentBranch.id] || { 
-              price: p.price, 
-              offerPrice: p.offer_price, 
-              stock: 0 
-            };
-
-            return {
-              id: p.id,
-              name: p.name,
-              brand: p.brand,
-              description: p.description,
-              barcode: p.barcode,
-              saleType: p.sale_type,
-              category: p.category,
-              imageUrl: p.image_url,
-              expiryDate: p.expiry_date,
-              isPack: p.is_pack,
-              packUnits: p.pack_units,
-              supplierId: p.supplier_id,
-              allowNegativeStock: p.allow_negative_stock || false,
-              isCombo: p.is_combo || false,
-              minStock: p.min_stock || 5,
-              comboItems: (p.combo_items || []).map((ci: any) => ({
-                id: ci.id,
-                comboProductId: ci.combo_product_id,
-                componentProductId: ci.component_product_id,
-                quantity: ci.quantity,
-                isSelectable: ci.is_selectable || false,
-                selectableCategory: ci.selectable_category || undefined
-              })) || [],
-              branchData,
-              price: currentData.price,
-              offerPrice: currentData.offerPrice,
-              stock: stockRecord
-            };
-          });
-          setProducts(loadedProducts);
-        }
-
-        // Fetch promotions
-        const { data: promoData } = await supabase
-          .from('promotions')
-          .select('*')
-          .eq('is_active', true);
-
-        if (promoData) {
-          setPromotions(promoData.map((pr: any): Promotion => ({
-            id: pr.id,
-            name: pr.name,
-            type: pr.type,
-            productId: pr.product_id,
-            buyQuantity: pr.buy_quantity,
-            getQuantity: pr.get_quantity,
-            discountPrice: pr.discount_price,
-            startDate: pr.start_date,
-            endDate: pr.end_date,
-            startTime: pr.start_time,
-            endTime: pr.end_time,
-            daysOfWeek: pr.days_of_week,
-            isActive: pr.is_active
-          })));
-        }
-
-        // Fetch sales
-        const { data: salesData } = await supabase
-          .from('sales')
-          .select(`
-            *,
-            sale_items (*)
-          `)
-          .eq('branch_id', currentBranch.id)
-          .order('date', { ascending: false });
-
-        if (salesData) {
-          const formattedSales: Sale[] = salesData.map(s => ({
-            id: s.id,
-            date: s.date,
-            total: s.total,
-            paymentMethod: s.payment_method,
-            cashierId: s.cashier_id,
-            branchId: s.branch_id,
-            status: s.status || 'completed',
-            voidReason: s.void_reason,
-            voidDate: s.void_date,
-            items: s.sale_items?.map((item: any) => {
-              const product = loadedProducts.find(p => p.id === item.product_id);
-              return {
-                ...product,
-                id: item.product_id || (product?.id || 'deleted'),
-                name: item.name || (product?.name || 'PRODUCTO ELIMINADO'),
-                barcode: item.barcode || (product?.barcode || 'N/A'),
-                brand: item.brand || (product?.brand || ''),
-                quantity: item.quantity || 0,
-                price: item.price || 0,
-                saleType: item.sale_type || (product?.sale_type || 'unit'),
-                imageUrl: product?.imageUrl // La imagen es lo único que dependemos del producto actual
-              } as CartItem;
-            }) || []
-          }));
-          setSales(formattedSales);
-        }
-
-        const { data: movementsData } = await supabase
-          .from('inventory_movements')
-          .select('*')
-          .or(`branch_id.eq.${currentBranch.id},to_branch_id.eq.${currentBranch.id}`)
-          .order('date', { ascending: false });
-
-        if (movementsData) {
-          const formattedMovements: InventoryMovement[] = movementsData.map(m => ({
-            id: m.id,
-            productId: m.product_id,
-            type: m.type,
-            quantity: m.quantity,
-            date: m.created_at || m.date, // Try both as Supabase uses created_at by default
-            reason: m.reason,
-            userId: m.user_id,
-            branchId: m.branch_id,
-            toBranchId: m.to_branch_id
-          }));
-          setMovements(formattedMovements);
-        }
-
-      } catch (error) {
-        console.error('Error fetching branch data:', error);
-      }
-    };
-
     fetchBranchData();
-  }, [currentBranch, currentUser]);
+  }, [currentBranch, currentUser, isConfigured]);
+
+  // Real-time synchronization
+  useEffect(() => {
+    if (!isConfigured) return;
+
+    const channel = supabase
+      .channel('app-realtime-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        fetchBranchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_stock' }, () => {
+        fetchBranchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+        fetchInitialData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'promotions' }, () => {
+        fetchBranchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+        fetchBranchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'company_settings' }, () => {
+        fetchInitialData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isConfigured, currentBranch, currentUser]);
 
   const addToCart = (product: Product, quantity: number = 1) => {
     // --- Caso especial: componente ya marcado desde el modal de selección del POS ---
