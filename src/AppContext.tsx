@@ -531,15 +531,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (saleError) throw saleError;
 
-      // --- 2. Registrar todos los ítems de la venta (incluyendo componentes de combo con precio $0) ---
+      // --- 2. Registrar todos los ítems de la venta ---
       const saleItems = cart.map(item => ({
         sale_id: saleData.id,
         product_id: item.id,
-        name: item.name,
-        barcode: item.barcode,
-        brand: item.brand,
         quantity: item.quantity,
-        sale_type: item.saleType,
         price: Math.round(item.offerPrice || item.price),
         subtotal: Math.round((item.offerPrice || item.price) * item.quantity)
       }));
@@ -573,7 +569,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .select('quantity, price, offer_price')
           .eq('product_id', productId)
           .eq('branch_id', currentBranch!.id)
-          .single();
+          .maybeSingle();
 
         const currentStock = currentStockData?.quantity || 0;
         const newStock = currentStock - qtyToDeduct;

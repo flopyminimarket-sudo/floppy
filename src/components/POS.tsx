@@ -22,8 +22,10 @@ export const POS = () => {
 
   // Sync autoPrint with branch settings when branch changes
   useEffect(() => {
-    setAutoPrint(currentBranch?.auto_print_ticket ?? false);
-  }, [currentBranch?.id, currentBranch?.auto_print_ticket]);
+    // Solo permitir auto-impresión si la sucursal coincide con el Local 2 (identificado por nombre)
+    const isLocalWithPrinter = currentBranch?.name?.toLowerCase().includes('2');
+    setAutoPrint(isLocalWithPrinter ? (currentBranch?.auto_print_ticket ?? false) : false);
+  }, [currentBranch?.id, currentBranch?.auto_print_ticket, currentBranch?.name]);
 
   // --- Estado del modal de selección de componente de combo ---
   const [comboSelectionModal, setComboSelectionModal] = useState<{
@@ -211,8 +213,8 @@ export const POS = () => {
         setLastSale(sale);
         setShowSuccessModal(true);
         
-        // If autoPrint is on, print immediately
-        if (autoPrint) {
+        // Solo imprimir automáticamente si es el Local 2 y tiene la opción activa
+        if (autoPrint && currentBranch?.name?.toLowerCase().includes('2')) {
           handlePrintTicket(sale);
         }
       }
@@ -224,8 +226,9 @@ export const POS = () => {
 
   const handlePrintTicket = async (sale: any) => {
     if (!isPrinterConnected) {
-      setTimeout(() => window.print(), 100);
-      toast.success('Abriendo ventana de impresión...');
+      // Hemos quitado el auto-salto a window.print() para evitar la ventana del navegador
+      // si no hay impresora térmica conectada.
+      toast.error('No hay una impresora térmica conectada');
       return;
     }
 
