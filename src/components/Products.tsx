@@ -12,6 +12,9 @@ export const Products = () => {
   const { products, currentBranch, branches, categories, addProduct, updateProduct, deleteProduct } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [comboSearch, setComboSearch] = useState(''); // Estado para buscar productos del combo
+  const [selectableSearches, setSelectableSearches] = useState<Record<string, string>>({}); // Búsqueda por item seleccionable
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterBranchId, setFilterBranchId] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,11 +55,24 @@ export const Products = () => {
     branchData: {} as Record<string, { price: string; offerPrice: string; stock: string }>
   });
 
-  const filteredProducts = products.filter(p => 
-    (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (p.barcode || '').includes(searchTerm) ||
-    (p.brand?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-  );
+  const activeBranchId = filterBranchId || currentBranch?.id;
+
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (p.barcode || '').includes(searchTerm) ||
+      (p.brand?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+    
+    const matchesCategory = filterCategory ? p.category === filterCategory : true;
+    
+    // "Por sucursal" we filter out items that have no connection or just show everything if we want to manage it.
+    // If a branch is selected, maybe we only want to show products that have > 0 stock in that branch?
+    // For now, let's use it to change the context of the stock being displayed.
+    let matchesBranch = true;
+    // Si se desea ocultar productos con stock 0 al elegir sucursal, se habilitaría abajo:
+    // if (filterBranchId) { matchesBranch = (p.stock?.[filterBranchId] || 0) > 0; }
+    
+    return matchesSearch && matchesCategory && matchesBranch;
+  });
 
   const handleDelete = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar este producto?')) {
@@ -435,21 +451,41 @@ export const Products = () => {
       </div>
 
       <div className="flex flex-col gap-4 mb-4 shrink-0">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre, marca o código..."
-            className="w-full pl-10 pr-4 py-3 bg-white border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, marca o código..."
+              className="w-full pl-10 pr-4 py-3 bg-white border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <select
+              className="px-4 py-3 bg-white border border-zinc-200 rounded-xl text-zinc-600 font-medium hover:bg-zinc-50 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+
+            <select
+              className="px-4 py-3 bg-white border border-zinc-200 rounded-xl text-zinc-600 font-medium hover:bg-zinc-50 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={filterBranchId}
+              onChange={(e) => setFilterBranchId(e.target.value)}
+            >
+              <option value="">Sucursal actual</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <button className="flex items-center gap-2 px-4 py-3 bg-white border border-zinc-200 rounded-xl text-zinc-600 font-medium hover:bg-zinc-50 transition-all shrink-0">
-          <Filter className="w-5 h-5" />
-          Filtros
-          <ChevronDown className="w-4 h-4" />
-        </button>
       </div>
 
       <div className="flex-1 bg-white rounded-[14px] border border-zinc-100 shadow-sm overflow-hidden flex flex-col min-h-0">
@@ -520,9 +556,9 @@ export const Products = () => {
                     <div className="flex items-center gap-2">
                       <div className={cn(
                         "w-2 h-2 rounded-full",
-                        (product.stock[currentBranch.id] || 0) <= (product.minStock ?? 5) ? "bg-rose-500" : (product.stock[currentBranch.id] || 0) <= (product.minStock ?? 5) * 2 ? "bg-amber-500" : "bg-emerald-500"
+                        (activeBranchId && product.stock[activeBranchId] !== undefined ? product.stock[activeBranchId] : 0) <= (product.minStock ?? 5) ? "bg-rose-500" : (activeBranchId && product.stock[activeBranchId] !== undefined ? product.stock[activeBranchId] : 0) <= (product.minStock ?? 5) * 2 ? "bg-amber-500" : "bg-emerald-500"
                       )} />
-                      <span className="text-sm font-medium text-zinc-700">{product.stock[currentBranch.id] || 0} {product.saleType === 'weight' ? 'kg' : 'unid.'}</span>
+                      <span className="text-sm font-medium text-zinc-700">{(activeBranchId ? product.stock[activeBranchId] : 0) || 0} {product.saleType === 'weight' ? 'kg' : 'unid.'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -855,43 +891,146 @@ export const Products = () => {
                                   </div>
 
                                   {/* Toggle: el cajero elige este componente en el POS */}
-                                  <div className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all ${item.isSelectable ? 'bg-amber-50 border-amber-200' : 'bg-zinc-50 border-zinc-100'}`}>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        className="w-4 h-4 rounded border-zinc-300 text-amber-500 focus:ring-amber-400"
-                                        checked={!!item.isSelectable}
-                                        onChange={(e) => setFormData({
-                                          ...formData,
-                                          comboItems: formData.comboItems.map(ci =>
-                                            ci.componentProductId === item.componentProductId
-                                              ? { ...ci, isSelectable: e.target.checked, selectableCategory: e.target.checked ? (ci.selectableCategory || component?.category || '') : undefined }
-                                              : ci
-                                          )
-                                        })}
-                                      />
-                                      <span className="text-[11px] font-bold text-zinc-600 uppercase tracking-wide">
-                                        Cajero elige este producto en el POS
-                                      </span>
-                                    </label>
-                                    {item.isSelectable && (
-                                      <select
-                                        className="ml-2 text-xs font-bold bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 text-zinc-700"
-                                        value={item.selectableCategory || ''}
-                                        onChange={(e) => setFormData({
-                                          ...formData,
-                                          comboItems: formData.comboItems.map(ci =>
-                                            ci.componentProductId === item.componentProductId
-                                              ? { ...ci, selectableCategory: e.target.value }
-                                              : ci
-                                          )
-                                        })}
-                                      >
-                                        <option value="">Categoría a mostrar...</option>
-                                        {categories.map(cat => (
-                                          <option key={cat.id} value={cat.name}>{cat.name}</option>
-                                        ))}
-                                      </select>
+                                  <div className={`flex flex-col px-3 py-2 rounded-lg border transition-all gap-2 ${item.isSelectable ? 'bg-amber-50 border-amber-200' : 'bg-zinc-50 border-zinc-100'}`}>
+                                    <div className="flex items-center justify-between">
+                                      <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="w-4 h-4 rounded border-zinc-300 text-amber-500 focus:ring-amber-400"
+                                          checked={!!item.isSelectable}
+                                          onChange={(e) => setFormData({
+                                            ...formData,
+                                            comboItems: formData.comboItems.map(ci =>
+                                              ci.componentProductId === item.componentProductId
+                                                ? { ...ci, isSelectable: e.target.checked, selectableCategory: e.target.checked ? (ci.selectableCategory || component?.category || '') : undefined, allowedProductIds: e.target.checked ? (ci.allowedProductIds || []) : undefined }
+                                                : ci
+                                            )
+                                          })}
+                                        />
+                                        <span className="text-[11px] font-bold text-zinc-600 uppercase tracking-wide">
+                                          Cajero elige este producto en el POS
+                                        </span>
+                                      </label>
+                                      {item.isSelectable && (
+                                        <select
+                                          className="ml-2 text-xs font-bold bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 text-zinc-700"
+                                          value={item.selectableCategory || ''}
+                                          onChange={(e) => setFormData({
+                                            ...formData,
+                                            comboItems: formData.comboItems.map(ci =>
+                                              ci.componentProductId === item.componentProductId
+                                                ? { ...ci, selectableCategory: e.target.value, allowedProductIds: [] }
+                                                : ci
+                                            )
+                                          })}
+                                        >
+                                          <option value="">Categoría a mostrar...</option>
+                                          {categories.map(cat => (
+                                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                          ))}
+                                        </select>
+                                      )}
+                                    </div>
+
+                                    {/* ─── Picker de productos autorizados ─── */}
+                                    {item.isSelectable && item.selectableCategory && (
+                                      <div className="space-y-2 pt-2 border-t border-amber-100">
+                                        <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest">
+                                          Productos autorizados para este slot:
+                                        </p>
+
+                                        {/* Chips de productos ya autorizados */}
+                                        <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                                          {(item.allowedProductIds || []).length === 0 ? (
+                                            <span className="text-[10px] text-amber-600 italic">
+                                              Sin restricción — el cajero verá toda la categoría
+                                            </span>
+                                          ) : (
+                                            (item.allowedProductIds || []).map(pid => {
+                                              const prod = products.find(p => p.id === pid);
+                                              return prod ? (
+                                                <span key={pid} className="flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-lg border border-amber-300">
+                                                  {prod.name}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setFormData({
+                                                      ...formData,
+                                                      comboItems: formData.comboItems.map(ci =>
+                                                        ci.componentProductId === item.componentProductId
+                                                          ? { ...ci, allowedProductIds: (ci.allowedProductIds || []).filter(id => id !== pid) }
+                                                          : ci
+                                                      )
+                                                    })}
+                                                    className="ml-0.5 hover:text-red-600 transition-colors"
+                                                  >
+                                                    <X className="w-2.5 h-2.5" />
+                                                  </button>
+                                                </span>
+                                              ) : null;
+                                            })
+                                          )}
+                                        </div>
+
+                                        {/* Buscador para agregar productos autorizados */}
+                                        <div className="relative">
+                                          <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-400 w-3 h-3" />
+                                          <input
+                                            type="text"
+                                            placeholder={`Autorizar producto de ${item.selectableCategory}...`}
+                                            className="w-full pl-7 pr-3 py-1.5 text-xs bg-white border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 placeholder:text-amber-300"
+                                            value={selectableSearches[item.componentProductId] || ''}
+                                            onChange={(e) => setSelectableSearches(prev => ({ ...prev, [item.componentProductId]: e.target.value }))}
+                                          />
+                                          {/* Dropdown de resultados */}
+                                          {(selectableSearches[item.componentProductId] || '').length > 0 && (
+                                            <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-amber-200 rounded-lg shadow-xl max-h-40 overflow-y-auto">
+                                              {products
+                                                .filter(p =>
+                                                  (p.category?.toLowerCase().trim() || '') === (item.selectableCategory?.toLowerCase().trim() || '') &&
+                                                  !(item.allowedProductIds || []).includes(p.id) &&
+                                                  (
+                                                    (p.name?.toLowerCase() || '').includes((selectableSearches[item.componentProductId] || '').toLowerCase()) ||
+                                                    (p.brand?.toLowerCase() || '').includes((selectableSearches[item.componentProductId] || '').toLowerCase())
+                                                  )
+                                                )
+                                                .slice(0, 8)
+                                                .map(p => (
+                                                  <button
+                                                    key={p.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setFormData({
+                                                        ...formData,
+                                                        comboItems: formData.comboItems.map(ci =>
+                                                          ci.componentProductId === item.componentProductId
+                                                            ? { ...ci, allowedProductIds: [...(ci.allowedProductIds || []), p.id] }
+                                                            : ci
+                                                        )
+                                                      });
+                                                      setSelectableSearches(prev => ({ ...prev, [item.componentProductId]: '' }));
+                                                    }}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-amber-50 text-left text-xs border-b border-zinc-50 last:border-0"
+                                                  >
+                                                    <Plus className="w-3 h-3 text-amber-500 shrink-0" />
+                                                    <span className="font-bold text-zinc-700 truncate">{p.name}</span>
+                                                    <span className="text-zinc-400 shrink-0 text-[10px]">{p.brand}</span>
+                                                  </button>
+                                                ))
+                                              }
+                                              {products.filter(p =>
+                                                (p.category?.toLowerCase().trim() || '') === (item.selectableCategory?.toLowerCase().trim() || '') &&
+                                                !(item.allowedProductIds || []).includes(p.id) &&
+                                                (
+                                                  (p.name?.toLowerCase() || '').includes((selectableSearches[item.componentProductId] || '').toLowerCase()) ||
+                                                  (p.brand?.toLowerCase() || '').includes((selectableSearches[item.componentProductId] || '').toLowerCase())
+                                                )
+                                              ).length === 0 && (
+                                                <div className="px-3 py-3 text-xs text-zinc-400 text-center">Sin resultados en esta categoría</div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
                                     )}
                                   </div>
                                 </div>

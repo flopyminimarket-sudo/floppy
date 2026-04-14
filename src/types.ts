@@ -58,6 +58,8 @@ export interface ComboItem {
   isSelectable?: boolean;
   /** Categoría de productos a mostrar en el modal de selección */
   selectableCategory?: string;
+  /** IDs específicos de productos autorizados por el admin. Si está vacío, se muestran todos los de la categoría */
+  allowedProductIds?: string[];
 }
 
 export type PromotionType = 'buy_x_get_y' | 'scheduled_discount';
@@ -90,13 +92,14 @@ export interface Sale {
   date: string;
   items: CartItem[];
   total: number;
-  paymentMethod: 'cash' | 'card' | 'transfer';
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'amipass' | 'pluxe' | 'edenred';
   cashierId: string;
   cashierName?: string;
   branchId: string;
   status?: 'completed' | 'voided';
   voidReason?: string;
   voidDate?: string;
+  customerName?: string;
 }
 
 export interface Supplier {

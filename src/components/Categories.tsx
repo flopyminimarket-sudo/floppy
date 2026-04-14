@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Category } from '../types';
 
 export const Categories = () => {
-  const { categories, addCategory, updateCategory, deleteCategory } = useApp();
+  const { categories, products, addCategory, updateCategory, deleteCategory } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -89,7 +89,12 @@ export const Categories = () => {
                       <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
                         <Tag className="w-5 h-5" />
                       </div>
-                      <span className="font-bold text-zinc-900">{category.name}</span>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-zinc-900">{category.name}</span>
+                        <span className="text-xs font-semibold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full w-fit">
+                          {products.filter(p => p.category === category.name).length} productos
+                        </span>
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">

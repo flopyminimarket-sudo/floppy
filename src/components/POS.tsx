@@ -30,7 +30,7 @@ export const POS = () => {
   // --- Estado del modal de selección de componente de combo ---
   const [comboSelectionModal, setComboSelectionModal] = useState<{
     combo: Product;
-    selectableItem: { quantity: number; category: string; label: string };
+    selectableItem: { quantity: number; category: string; label: string; allowedProductIds?: string[] };
     searchFilter: string;
   } | null>(null);
 
@@ -84,9 +84,10 @@ export const POS = () => {
 
   const [weightInput, setWeightInput] = useState('');
   const [selectedWeightProduct, setSelectedWeightProduct] = useState<any>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'cash' | 'card' | 'amipass' | 'pluxe' | 'edenred' | 'transfer' | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
+  const [customerName, setCustomerName] = useState('');
 
   const handleProductClick = (product: any) => {
     if (product.saleType === 'weight') {
@@ -114,7 +115,8 @@ export const POS = () => {
             selectableItem: {
               quantity: selectableItem.quantity,
               category: selectableItem.selectableCategory!,
-              label: selectableItem.selectableCategory!
+              label: selectableItem.selectableCategory!,
+              allowedProductIds: selectableItem.allowedProductIds
             },
             searchFilter: ''
           });
@@ -204,10 +206,12 @@ export const POS = () => {
     }
   };
 
-  const handleProcessSale = async (method: 'cash' | 'card' | 'transfer') => {
+  const handleProcessSale = async () => {
+    if (!selectedPaymentMethod) return;
     try {
-      const sale = await processSale(method);
-      setShowPaymentModal(false);
+      const sale = await processSale(selectedPaymentMethod, customerName);
+      setSelectedPaymentMethod(null);
+      setCustomerName(''); // Limpiar nombre después de venta
       
       if (sale) {
         setLastSale(sale);
@@ -226,9 +230,10 @@ export const POS = () => {
 
   const handlePrintTicket = async (sale: any) => {
     if (!isPrinterConnected) {
-      // Hemos quitado el auto-salto a window.print() para evitar la ventana del navegador
-      // si no hay impresora térmica conectada.
-      toast.error('No hay una impresora térmica conectada');
+      // Sin impresora térmica: fallback al navegador (window.print)
+      // El componente <PrintTicket> oculto al final del JSX se encarga de mostrar el ticket
+      setLastSale(sale); // Asegurar que lastSale tiene la venta correcta
+      setTimeout(() => window.print(), 100); // Pequeño delay para que React actualice el DOM
       return;
     }
 
@@ -249,15 +254,22 @@ export const POS = () => {
     (p.barcode || '').includes(searchTerm)
   );
 
-  // Productos del modal filtrados por categoría y término de búsqueda
+  // Productos del modal filtrados: si el admin autorizó IDs específicos, usar esos; si no, filtrar por categoría
   const comboModalProducts = comboSelectionModal
     ? products.filter(p => {
-        const matchCategory = p.category?.toLowerCase() === comboSelectionModal.selectableItem.category.toLowerCase();
-        const hasStock = p.allowNegativeStock || (p.stock?.[currentBranch?.id ?? ''] ?? 0) > 0;
+        const { allowedProductIds, category } = comboSelectionModal.selectableItem;
         const matchSearch = comboSelectionModal.searchFilter
           ? (p.name?.toLowerCase() || '').includes(comboSelectionModal.searchFilter.toLowerCase())
           : true;
-        return matchCategory && hasStock && matchSearch;
+
+        if (allowedProductIds && allowedProductIds.length > 0) {
+          // Modo restringido: solo los productos que el admin autorizó
+          return allowedProductIds.includes(p.id) && matchSearch;
+        }
+
+        // Modo libre: todos los de la categoría (comportamiento original)
+        const matchCategory = (p.category?.toLowerCase().trim() || '') === category.toLowerCase().trim();
+        return matchCategory && matchSearch;
       })
     : [];
 
@@ -467,10 +479,10 @@ export const POS = () => {
 
         {/* Cart Sidebar (Right Column) - Expanded and Fixed */}
         <div className="w-[500px] flex flex-col bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.05)] shrink-0 overflow-hidden">
-          <div className="p-6 bg-blue-600 text-white flex flex-col gap-4 shrink-0">
+          <div className="p-3 bg-blue-600 text-white flex flex-col gap-2 shrink-0">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-black flex items-center gap-2 uppercase tracking-tight">
+                <h2 className="text-lg font-black flex items-center gap-2 uppercase tracking-tight">
                   Nueva Orden
                 </h2>
                 <p className="text-blue-100 text-xs font-bold mt-1 uppercase tracking-widest">
@@ -595,26 +607,60 @@ export const POS = () => {
           </div>
 
           {/* Fixed Bottom Cart Controls */}
-          <div className="p-6 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] shrink-0">
-            <div className="flex justify-between items-end mb-6">
+          <div className="p-4 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] shrink-0 flex flex-col gap-3">
+            <div className="flex justify-between items-end">
               <div className="flex flex-col">
-                <span className="text-xs font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Cantidad de productos:</span>
-                <span className="text-2xl font-black text-zinc-900 dark:text-zinc-100 leading-none">
+                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Cant. Prod:</span>
+                <span className="text-xl font-black text-zinc-900 dark:text-zinc-100 leading-none">
                   {cart.reduce((sum, item) => sum + (item.saleType === 'weight' ? 1 : item.quantity), 0)}
                 </span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-1">Total a Pagar</span>
-                <span className="text-4xl font-black text-blue-600 leading-none">{formatCurrency(total)}</span>
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Total a Pagar</span>
+                <span className="text-3xl font-black text-blue-600 leading-none">{formatCurrency(total)}</span>
               </div>
             </div>
 
+            <div className="w-full relative">
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Nombre Cliente (Opcional)"
+                className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-lg py-2.5 px-3 text-sm text-zinc-900 dark:text-zinc-100 font-bold placeholder-zinc-400 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-5 gap-1.5 h-12">
+              {[
+                { id: 'cash', label: 'Efectivo', bg: 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600', hover: 'hover:bg-emerald-100 dark:hover:bg-emerald-900/50', border: 'border-emerald-200 dark:border-emerald-800' },
+                { id: 'card', label: 'Tarjeta', bg: 'bg-blue-50 dark:bg-blue-950/30 text-blue-600', hover: 'hover:bg-blue-100 dark:hover:bg-blue-900/50', border: 'border-blue-200 dark:border-blue-800' },
+                { id: 'amipass', label: 'Amipass', bg: 'bg-orange-50 dark:bg-orange-950/30 text-orange-600', hover: 'hover:bg-orange-100 dark:hover:bg-orange-900/50', border: 'border-orange-200 dark:border-orange-800' },
+                { id: 'pluxe', label: 'Pluxe', bg: 'bg-sky-50 dark:bg-sky-950/30 text-sky-600', hover: 'hover:bg-sky-100 dark:hover:bg-sky-900/50', border: 'border-sky-200 dark:border-sky-800' },
+                { id: 'edenred', label: 'Edenred', bg: 'bg-red-50 dark:bg-red-950/30 text-red-600', hover: 'hover:bg-red-100 dark:hover:bg-red-900/50', border: 'border-red-200 dark:border-red-800' },
+              ].map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => setSelectedPaymentMethod(m.id as any)}
+                  className={cn(
+                    "flex flex-col items-center justify-center rounded-lg border text-[10px] font-black uppercase tracking-tighter leading-none transition-all",
+                    m.bg,
+                    m.hover,
+                    m.border,
+                    selectedPaymentMethod === m.id ? "ring-2 ring-blue-500 shadow-md scale-105 z-10 opacity-100" : "opacity-60 grayscale-[50%]"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
             <button
-              disabled={cart.length === 0}
-              onClick={() => setShowPaymentModal(true)}
-              className="flex items-center justify-center gap-3 w-full py-5 bg-blue-600 dark:bg-blue-500 text-white rounded-[14px] font-black text-xl hover:bg-blue-700 dark:hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98]"
+              disabled={cart.length === 0 || !selectedPaymentMethod}
+              onClick={handleProcessSale}
+              className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-black text-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md active:scale-[0.99]"
             >
-              <CreditCard className="w-7 h-7" />
+              <CreditCard className="w-5 h-5" />
               <span className="uppercase tracking-tighter">PAGAR</span>
             </button>
           </div>
@@ -675,10 +721,16 @@ export const POS = () => {
                   <div className="flex flex-col items-center justify-center py-16 text-zinc-400 gap-3">
                     <ShoppingCart className="w-12 h-12 opacity-30" />
                     <p className="font-bold text-sm">
-                      No hay {comboSelectionModal.selectableItem.label.toLowerCase()}s disponibles con stock
+                      {comboSelectionModal.selectableItem.allowedProductIds?.length
+                        ? 'Ningún producto autorizado tiene stock disponible'
+                        : `No hay ${comboSelectionModal.selectableItem.label.toLowerCase()}s disponibles con stock`
+                      }
                     </p>
                     <p className="text-xs text-center text-zinc-400">
-                      Verifica que existan productos en la categoría "{comboSelectionModal.selectableItem.category}" con stock mayor a 0.
+                      {comboSelectionModal.selectableItem.allowedProductIds?.length
+                        ? `El admin autorizó ${comboSelectionModal.selectableItem.allowedProductIds.length} producto(s) pero ninguno tiene stock actualmente.`
+                        : `Verifica que existan productos en la categoría "${comboSelectionModal.selectableItem.category}" con stock mayor a 0.`
+                      }
                     </p>
                   </div>
                 ) : (
@@ -790,75 +842,7 @@ export const POS = () => {
         )}
       </AnimatePresence>
 
-      {/* Payment Modal */}
-      <AnimatePresence>
-        {showPaymentModal && (
-          <div className="fixed inset-0 bg-zinc-900/60 backdrop-blur-md flex items-center justify-center z-[60] p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-[14px] shadow-2xl w-full max-w-sm overflow-hidden border border-zinc-100 dark:border-zinc-800"
-            >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-950/50">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-600 rounded-[14px] flex items-center justify-center text-white shadow-lg shadow-blue-200 dark:shadow-none">
-                    <CreditCard className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-zinc-900 dark:text-zinc-100 uppercase tracking-tight">Finalizar Pago</h3>
-                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-widest">Seleccione método</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowPaymentModal(false)}
-                  className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl transition-colors text-zinc-400 dark:text-zinc-500"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-8">
-                <div className="bg-zinc-50 dark:bg-zinc-950 rounded-[14px] p-6 mb-8 border border-zinc-100 dark:border-zinc-800 text-center relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform">
-                    <DollarSign className="w-20 h-20 text-blue-600" />
-                  </div>
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mb-2">Total a Pagar</p>
-                  <p className="text-5xl font-black text-blue-600 tracking-tighter tabular-nums leading-none">
-                    {formatCurrency(total)}
-                  </p>
-                </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                  {[
-                    { id: 'cash', label: 'Efectivo', icon: Banknote, color: 'emerald' },
-                    { id: 'card', label: 'Tarjeta', icon: CreditCard, color: 'blue' },
-                    { id: 'transfer', label: 'Transferencia', icon: Smartphone, color: 'purple' }
-                  ].map((method) => (
-                    <button
-                      key={method.id}
-                      onClick={() => handleProcessSale(method.id as any)}
-                      className={cn(
-                        "flex items-center justify-between p-4 rounded-[14px] transition-all border group relative active:scale-[0.98]",
-                        method.color === 'emerald' ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 dark:hover:bg-emerald-600 hover:text-white dark:hover:text-white" :
-                        method.color === 'blue' ? "bg-blue-50 dark:bg-blue-950/20 border-blue-100 dark:border-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-600 dark:hover:bg-blue-600 hover:text-white dark:hover:text-white" :
-                        "bg-purple-50 dark:bg-purple-950/20 border-purple-100 dark:border-purple-900/30 text-purple-700 dark:text-purple-400 hover:bg-purple-600 dark:hover:bg-purple-600 hover:text-white dark:hover:text-white"
-                      )}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
-                          <method.icon className="w-6 h-6" />
-                        </div>
-                        <span className="font-black uppercase tracking-wider text-sm">{method.label}</span>
-                      </div>
-                      <ChevronRight className="w-5 h-5 opacity-30 group-hover:opacity-100 transition-opacity" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
       {/* Success Modal */}
       <AnimatePresence>
         {showSuccessModal && lastSale && (

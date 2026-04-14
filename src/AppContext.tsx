@@ -195,7 +195,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id,
               combo_product_id,
               component_product_id,
-              quantity
+              quantity,
+              is_selectable,
+              selectable_category
             )
           `);
           
@@ -502,7 +504,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCart(prev => prev.map(item => item.id === productId ? { ...item, notes } : item));
   };
 
-  const processSale = async (paymentMethod: 'cash' | 'card' | 'transfer') => {
+  const processSale = async (paymentMethod: 'cash' | 'card' | 'transfer' | 'amipass' | 'pluxe' | 'edenred', customerName?: string) => {
     try {
       if (cart.length === 0) return null;
 
@@ -524,7 +526,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           total,
           payment_method: paymentMethod,
           cashier_id: currentUser?.id,
-          branch_id: currentBranch?.id
+          branch_id: currentBranch?.id,
+          customer_name: customerName || null
         })
         .select()
         .single();
@@ -608,7 +611,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cashierId: currentUser!.id,
         cashierName: currentUser!.name,
         branchId: currentBranch!.id,
-        status: 'completed'
+        status: 'completed',
+        customerName: customerName || undefined
       };
 
       setSales(prev => [newSale, ...prev]);

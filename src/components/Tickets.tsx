@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../AppContext';
 import { formatCurrency, cn } from '../lib/utils';
 import { Receipt, Calendar, Clock, MapPin, User, CreditCard, Banknote, Smartphone, Package, Search, X, ChevronRight, Printer, Download, Filter, AlertCircle, Trash2 } from 'lucide-react';
@@ -15,8 +15,10 @@ export const Tickets = () => {
   const [filterDate, setFilterDate] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [filterBranchId, setFilterBranchId] = useState('');
+  const [filterCashierId, setFilterCashierId] = useState('');
   const [filterPaymentMethod, setFilterPaymentMethod] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<Sale | null>(null);
+  const [initialCash, setInitialCash] = useState<number | ''>('');
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [isVoiding, setIsVoiding] = useState(false);
@@ -75,6 +77,11 @@ export const Tickets = () => {
       currentY += 7;
     }
 
+    if (filterCashierId) {
+      doc.text(`Cajero: ${getCashierName(filterCashierId)}`, 14, currentY);
+      currentY += 7;
+    }
+
     // Preparar datos de la tabla
     const tableData = filteredSales.map(sale => [
       sale.id.substring(0, 8),
@@ -97,6 +104,64 @@ export const Tickets = () => {
       footStyles: { fillColor: [244, 244, 245], textColor: [24, 24, 27], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [250, 250, 250] },
       margin: { top: 20 },
+    });
+
+    // Añadir Resumen del Informe al PDF
+    const finalY = (doc as any).lastAutoTable.finalY || 200;
+    let startY = finalY + 15;
+
+    // Verificar si necesitamos una nueva página
+    if (startY + 50 > 280) {
+      doc.addPage();
+      startY = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setTextColor(24, 24, 27); // Zinc-900
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN DEL INFORME', 14, startY);
+
+    doc.setFontSize(10);
+    const initialAmt = initialCash || 0;
+    
+    // Columna Izquierda
+    let leftY = startY + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('INICIAL DE CAJA:', 14, leftY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${formatCurrency(initialAmt)}`, 85, leftY, { align: 'right' });
+    
+    leftY += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(239, 68, 68); // Red-500
+    doc.text('VENTA CIGARRILLOS:', 14, leftY);
+    doc.text(`${formatCurrency(summary.cigarettesTotal)}`, 85, leftY, { align: 'right' });
+
+    leftY += 10;
+    doc.setTextColor(16, 185, 129); // Emerald-500
+    doc.text('CAJA ESPERADA (EFECTIVO):', 14, leftY);
+    doc.text(`${formatCurrency(summary.totals.cash + initialAmt)}`, 85, leftY, { align: 'right' });
+    doc.setTextColor(24, 24, 27); // Reset color
+
+    // Columna Derecha (Desglose por método)
+    let rightY = startY + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('VENTAS POR MÉTODO:', 110, rightY);
+    doc.setFont('helvetica', 'normal');
+    
+    const methods = [
+      { name: 'Efectivo', amount: summary.totals.cash },
+      { name: 'Tarjeta', amount: summary.totals.card },
+      { name: 'Transferencia', amount: summary.totals.transfer },
+      { name: 'Amipass', amount: summary.totals.amipass },
+      { name: 'Pluxe', amount: summary.totals.pluxe },
+      { name: 'Edenred', amount: summary.totals.edenred }
+    ];
+
+    methods.forEach(m => {
+      rightY += 6;
+      doc.text(`${m.name}:`, 110, rightY);
+      doc.text(`${formatCurrency(m.amount)}`, 180, rightY, { align: 'right' });
     });
 
     doc.save(`resumen_ventas_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -136,9 +201,39 @@ export const Tickets = () => {
 
     const matchesPayment = filterPaymentMethod ? sale.paymentMethod === filterPaymentMethod : true;
     const matchesBranch = filterBranchId ? sale.branchId === filterBranchId : true;
+    const matchesCashier = filterCashierId ? sale.cashierId === filterCashierId : true;
 
-    return matchesSearch && matchesDate && matchesPayment && matchesBranch;
+    return matchesSearch && matchesDate && matchesPayment && matchesBranch && matchesCashier;
   });
+
+  const summary = useMemo(() => {
+    const totals = {
+      cash: 0,
+      card: 0,
+      amipass: 0,
+      pluxe: 0,
+      edenred: 0,
+      transfer: 0
+    };
+    let cigarettesTotal = 0;
+
+    filteredSales.forEach(sale => {
+      if (sale.status !== 'voided') {
+        const method = sale.paymentMethod as keyof typeof totals;
+        if (totals[method] !== undefined) {
+          totals[method] += sale.total;
+        }
+
+        sale.items?.forEach(item => {
+          if ((item?.category || '').toLowerCase().includes('cigarrillo')) {
+            cigarettesTotal += ((item?.price || item?.offerPrice || 0) * (item?.quantity || 1));
+          }
+        });
+      }
+    });
+
+    return { totals, cigarettesTotal };
+  }, [filteredSales]);
 
   const getPaymentIcon = (method: string) => {
     switch (method) {
@@ -153,6 +248,9 @@ export const Tickets = () => {
     switch (method) {
       case 'cash': return 'Efectivo';
       case 'card': return 'Tarjeta';
+      case 'amipass': return 'Amipass';
+      case 'pluxe': return 'Pluxe';
+      case 'edenred': return 'Edenred';
       case 'transfer': return 'Transferencia';
       default: return method;
     }
@@ -242,6 +340,18 @@ export const Tickets = () => {
               </select>
               
               <select
+                className="px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium appearance-none pr-10 min-w-[160px]"
+                value={filterCashierId}
+                onChange={(e) => setFilterCashierId(e.target.value)}
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+              >
+                <option value="">Todos los cajeros</option>
+                {users.map(user => (
+                  <option key={user.id} value={user.id}>{user.name}</option>
+                ))}
+              </select>
+
+              <select
                 className="px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium appearance-none pr-10"
                 value={filterPaymentMethod}
                 onChange={(e) => setFilterPaymentMethod(e.target.value)}
@@ -250,6 +360,9 @@ export const Tickets = () => {
                 <option value="">Todos los métodos</option>
                 <option value="cash">Efectivo</option>
                 <option value="card">Tarjeta</option>
+                <option value="amipass">Amipass</option>
+                <option value="pluxe">Pluxe</option>
+                <option value="edenred">Edenred</option>
                 <option value="transfer">Transferencia</option>
               </select>
             </div>
@@ -335,6 +448,62 @@ export const Tickets = () => {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="flex-none bg-white border border-zinc-200 rounded-[14px] shadow-sm overflow-hidden p-6 mt-4">
+        <h3 className="text-xl font-black text-zinc-800 uppercase tracking-tight mb-4">Resumen del Informe</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="space-y-4">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Inicial de caja</label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">$</span>
+              <input
+                type="number"
+                placeholder="0"
+                className="w-full pl-8 pr-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-zinc-800"
+                value={initialCash}
+                onChange={(e) => setInitialCash(e.target.value ? Number(e.target.value) : '')}
+              />
+            </div>
+            <p className="text-xs font-semibold text-zinc-400 leading-relaxed">Monto ingresado por el cajero al iniciar su turno el día de hoy.</p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Ventas por Método (Aprobadas)</label>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Efectivo</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.cash)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Tarjeta</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.card)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Transferencia</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.transfer)}</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Otros Métodos & Categorías</label>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100 flex-wrap gap-2">
+              <div className="flex justify-between text-xs font-bold text-zinc-600 basis-full gap-2">
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Amipass: {formatCurrency(summary.totals.amipass)}</span>
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Pluxe: {formatCurrency(summary.totals.pluxe)}</span>
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Edenred: {formatCurrency(summary.totals.edenred)}</span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center bg-rose-50 p-2.5 rounded-lg border border-rose-100 mt-2">
+              <span className="font-bold text-rose-700 text-sm uppercase">Venta Cigarrillos</span>
+              <span className="font-black text-rose-800">{formatCurrency(summary.cigarettesTotal)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 mt-2">
+              <span className="font-black text-emerald-800 text-sm uppercase">Caja Esperada (Efectivo)</span>
+              <span className="font-black text-emerald-900 text-lg">{formatCurrency(summary.totals.cash + (initialCash || 0))}</span>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -9,8 +9,8 @@ interface PrintTicketProps {
 
 /* ─── Shared styles ─── */
 const base: React.CSSProperties = {
-  fontFamily: "'Courier New', Courier, monospace",
-  fontSize: '10pt',
+  fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  fontSize: '11pt',
   fontWeight: 600,
   color: '#000',
   lineHeight: 1.4,
@@ -33,8 +33,8 @@ const PriceRow = ({
   priceStyle?: React.CSSProperties;
 }) => (
   <div style={{ display: 'flex', width: '100%', alignItems: 'baseline' }}>
-    <div style={{ flex: 1, overflow: 'hidden', ...labelStyle }}>{label}</div>
-    <div style={{ width: '18mm', textAlign: 'right', flexShrink: 0, ...priceStyle }}>
+    <div style={{ flex: 1, overflow: 'hidden', paddingRight: '2mm', ...labelStyle }}>{label}</div>
+    <div style={{ width: '24mm', textAlign: 'right', flexShrink: 0, ...priceStyle }}>
       {price}
     </div>
   </div>
@@ -50,6 +50,9 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
   const paymentLabel =
     sale.paymentMethod === 'cash' ? 'EFECTIVO' :
     sale.paymentMethod === 'card' ? 'TARJETA' :
+    sale.paymentMethod === 'amipass' ? 'AMIPASS' :
+    sale.paymentMethod === 'pluxe' ? 'PLUXE' :
+    sale.paymentMethod === 'edenred' ? 'EDENRED' :
     'TRANSFERENCIA';
 
   const totalDiscount = (sale.items || []).reduce((acc: number, item: any) => {
@@ -62,14 +65,14 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
     <div
       style={{
         ...base,
-        width: '68mm',
+        width: '76mm', // Más ancho para aprovechar el papel de 80mm
         margin: '0 auto',
-        padding: '3mm 2mm',
+        padding: '3mm 0mm', // Reducido el margen lateral blanco
       }}
     >
       {/* ── HEADER ── */}
-      <div style={{ textAlign: 'center', marginBottom: '3mm' }}>
-        <div style={{ ...bold, fontSize: '15pt', letterSpacing: '1px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '4mm' }}>
+        <div style={{ ...bold, fontSize: '16pt', letterSpacing: '0.5px' }}>
           {(companySettings.name || 'Empresa').toUpperCase()}
         </div>
         {companySettings.slogan && (
@@ -115,29 +118,29 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
         const lineDiscount = Math.round(discount * (item?.quantity || 0));
 
         return (
-          <div key={`${item?.id || i}-${i}`} style={{ marginBottom: '2.5mm' }}>
+          <div key={`${item?.id || i}-${i}`} style={{ marginBottom: '3mm' }}>
             {/* Name */}
-            <div style={{ ...bold, wordBreak: 'break-word', fontSize: '11pt' }}>
+            <div style={{ ...bold, wordBreak: 'break-word', fontSize: '12pt' }}>
               {(item?.name || 'PRODUCTO').toUpperCase()}
             </div>
 
             {/* Kitchen note */}
             {item?.notes && (
-              <div style={{ fontSize: '9.5pt', fontStyle: 'italic', paddingLeft: '2mm', ...bold }}>
+              <div style={{ fontSize: '10pt', fontStyle: 'italic', paddingLeft: '2mm', ...bold }}>
                 * {item.notes}
               </div>
             )}
 
             {/* Qty × price → line total */}
             <PriceRow
-              label={<span style={bold}>  {qtyLabel} x {formatCurrency(finalPrice)}</span>}
+              label={<span style={bold}>{qtyLabel} x {formatCurrency(finalPrice)}</span>}
               price={formatCurrency(lineTotal)}
               priceStyle={bold}
             />
 
             {/* Discount note if applicable */}
             {lineDiscount > 0 && (
-              <div style={{ fontSize: '9pt', fontStyle: 'italic', paddingLeft: '4mm', ...bold, color: '#333' }}>
+              <div style={{ fontSize: '10pt', fontStyle: 'italic', paddingLeft: '4mm', ...bold, color: '#333' }}>
                 (Dcto: -{formatCurrency(lineDiscount)})
               </div>
             )}
@@ -163,13 +166,19 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
 
       {/* ── TOTAL ── */}
       <PriceRow
-        label={<span style={{ ...bold, fontSize: '13pt' }}>TOTAL:</span>}
+        label={<span style={{ ...bold, fontSize: '14pt' }}>TOTAL:</span>}
         price={formatCurrency(Math.round(sale.total || 0))}
-        labelStyle={{ fontSize: '13pt' }}
-        priceStyle={{ ...bold, fontSize: '13pt' }}
+        labelStyle={{ fontSize: '14pt' }}
+        priceStyle={{ ...bold, fontSize: '14pt' }}
       />
 
       <Divider />
+
+      {sale.customerName && (
+        <div style={{ textAlign: 'center', margin: '3mm 0', ...bold }}>
+          <div style={{ fontSize: '10pt', textTransform: 'uppercase' }}>Cliente: {sale.customerName}</div>
+        </div>
+      )}
 
       {/* ── FOOTER ── */}
       <div style={{ textAlign: 'center', marginTop: '3mm', ...bold }}>
