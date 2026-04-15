@@ -211,6 +211,18 @@ export class ESCPOSPrinter {
     addCmd([0x1B, 0x45, 0x00]); // Bold Off
     addText('------------------------------------------\n');
     
+    // Customer Name (if present)
+    if (sale.customerName) {
+      addCmd([0x1B, 0x61, 0x01]); // Align Center
+      addCmd([0x1B, 0x45, 0x01]); // Bold On
+      addCmd([0x1D, 0x21, 0x11]); // Double height & width
+      addText(`CLIENTE: ${sale.customerName.toUpperCase()}\n`);
+      addCmd([0x1D, 0x21, 0x00]); // Normal size
+      addCmd([0x1B, 0x45, 0x00]); // Bold Off
+      addText('------------------------------------------\n');
+    }
+
+    
     // QR Code Generation
     const qrData = `Ticket:${sale.id}|Total:${sale.total}|Fecha:${sale.date}`;
     const qrBytes = Array.from(encoder.encode(qrData));

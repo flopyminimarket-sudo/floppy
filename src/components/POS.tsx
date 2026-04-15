@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../AppContext';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun, Layers } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun, Layers, User } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { printer } from '../lib/bluetoothPrinter';
@@ -621,14 +621,22 @@ export const POS = () => {
               </div>
             </div>
 
-            <div className="w-full relative">
+            <div className="w-full relative group">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-blue-500 transition-colors">
+                <User className="w-4 h-4" />
+              </div>
               <input
                 type="text"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Nombre Cliente (Opcional)"
-                className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-lg py-2.5 px-3 text-sm text-zinc-900 dark:text-zinc-100 font-bold placeholder-zinc-400 focus:ring-2 focus:ring-blue-500"
+                placeholder="NOMBRE CLIENTE (PEDIR AL CLIENTE)"
+                className="w-full bg-zinc-50 dark:bg-zinc-800 border-2 border-transparent focus:border-blue-500 rounded-lg py-2.5 pl-10 pr-3 text-sm text-zinc-900 dark:text-zinc-100 font-black placeholder-zinc-400 outline-none transition-all uppercase"
               />
+              {!customerName && (
+                <div className="absolute -top-6 left-0 text-[10px] font-black text-blue-600 dark:text-blue-400 animate-pulse uppercase tracking-wider">
+                  ¡Preguntar nombre! ☝️
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-5 gap-1.5 h-12">

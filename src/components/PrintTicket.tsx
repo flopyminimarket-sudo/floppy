@@ -11,14 +11,14 @@ interface PrintTicketProps {
 const base: React.CSSProperties = {
   fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
   fontSize: '11pt',
-  fontWeight: 600,
+  fontWeight: 400, // Bajado de 600
   color: '#000',
   lineHeight: 1.4,
   margin: 0,
   padding: 0,
   boxSizing: 'border-box',
 };
-const bold: React.CSSProperties = { fontWeight: 900 };
+const bold: React.CSSProperties = { fontWeight: 700 }; // Bajado de 900
 
 /* Price column is always 18mm wide, description takes the rest */
 const PriceRow = ({
@@ -175,8 +175,10 @@ export const PrintTicket: React.FC<PrintTicketProps> = ({ sale, companySettings 
       <Divider />
 
       {sale.customerName && (
-        <div style={{ textAlign: 'center', margin: '3mm 0', ...bold }}>
-          <div style={{ fontSize: '10pt', textTransform: 'uppercase' }}>Cliente: {sale.customerName}</div>
+        <div style={{ textAlign: 'center', margin: '4mm 0', ...bold }}>
+          <div style={{ fontSize: '13pt', textTransform: 'uppercase', border: '1.5px solid #000', padding: '1.5mm', borderRadius: '1mm' }}>
+            CLIENTE: {sale.customerName}
+          </div>
         </div>
       )}
 
