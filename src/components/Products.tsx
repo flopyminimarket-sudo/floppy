@@ -180,13 +180,14 @@ export const Products = () => {
   const handleSubmit = async () => {
     if (!currentBranch) return;
 
-    const formattedBranchData: Record<string, { price: number; offerPrice?: number; stock: number }> = {};
+    const formattedBranchData: Record<string, { price: number; offerPrice?: number; stock: number; isVisible: boolean }> = {};
     Object.entries(formData.branchData).forEach(([branchId, data]) => {
       const bData = data as any;
       formattedBranchData[branchId] = {
         price: Math.round(parseFloat(bData.price) || 0),
         offerPrice: bData.offerPrice ? Math.round(parseFloat(bData.offerPrice)) : undefined,
-        stock: parseFloat(bData.stock) || 0
+        stock: parseFloat(bData.stock) || 0,
+        isVisible: bData.isVisible !== false
       };
     });
 
