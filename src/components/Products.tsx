@@ -52,7 +52,7 @@ export const Products = () => {
     minStock: '5',
     isCombo: false,
     comboItems: [] as ComboItem[],
-    branchData: {} as Record<string, { price: string; offerPrice: string; stock: string }>
+    branchData: {} as Record<string, { price: string; offerPrice: string; stock: string; isVisible: boolean }>
   });
 
   const activeBranchId = filterBranchId || currentBranch?.id;
@@ -83,13 +83,14 @@ export const Products = () => {
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
     
-    const branchData: Record<string, { price: string; offerPrice: string; stock: string }> = {};
+    const branchData: Record<string, { price: string; offerPrice: string; stock: string; isVisible: boolean }> = {};
     branches.forEach(branch => {
-      const data = (product.branchData[branch.id] || { price: 0, offerPrice: undefined, stock: 0 }) as any;
+      const data = (product.branchData[branch.id] || { price: 0, offerPrice: undefined, stock: 0, isVisible: true }) as any;
       branchData[branch.id] = {
         price: data.price.toString(),
         offerPrice: data.offerPrice ? data.offerPrice.toString() : '',
-        stock: data.stock.toString()
+        stock: data.stock.toString(),
+        isVisible: data.isVisible !== false
       };
     });
 
@@ -115,9 +116,9 @@ export const Products = () => {
 
   const handleNew = (barcode?: string) => {
     setEditingProduct(null);
-    const branchData: Record<string, { price: string; offerPrice: string; stock: string }> = {};
+    const branchData: Record<string, { price: string; offerPrice: string; stock: string; isVisible: boolean }> = {};
     branches.forEach(branch => {
-      branchData[branch.id] = { price: '', offerPrice: '', stock: '' };
+      branchData[branch.id] = { price: '', offerPrice: '', stock: '', isVisible: true };
     });
 
     setFormData({
@@ -1134,6 +1135,35 @@ export const Products = () => {
                       })} 
                     />
                   </div>
+                  <div className="col-span-2 p-4 bg-emerald-50 rounded-[14px] border border-emerald-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-500 border border-emerald-100">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-zinc-900 block tracking-tight">Visibilidad en Sucursal Actual</span>
+                        <span className="text-[11px] text-zinc-500 font-medium italic">¿Mostrar este producto en el POS de esta sucursal?</span>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer bg-white px-4 py-2 rounded-lg border border-emerald-200 shadow-sm transition-all hover:bg-emerald-50/50">
+                      <input 
+                        type="checkbox" 
+                        className="w-5 h-5 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                        checked={formData.branchData[currentBranch?.id || '']?.isVisible !== false}
+                        onChange={e => setFormData({
+                          ...formData,
+                          branchData: {
+                            ...formData.branchData,
+                            [currentBranch?.id || '']: {
+                              ...(formData.branchData[currentBranch?.id || ''] || { price: '', offerPrice: '', stock: '0' }),
+                              isVisible: e.target.checked
+                            }
+                          }
+                        })}
+                      />
+                      <span className="text-sm font-bold text-emerald-700">Visible</span>
+                    </label>
+                  </div>
                 </div>
 
                 {branches.length > 1 && (
@@ -1191,6 +1221,27 @@ export const Products = () => {
                               })}
                             />
                           </div>
+                        </div>
+                        <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
+                          <span className="text-xs font-bold text-zinc-400 uppercase">Visibilidad en {branch.name}</span>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                              checked={formData.branchData[branch.id]?.isVisible !== false}
+                              onChange={e => setFormData({
+                                ...formData,
+                                branchData: {
+                                  ...formData.branchData,
+                                  [branch.id]: {
+                                    ...(formData.branchData[branch.id] || { price: '', offerPrice: '', stock: '0' }),
+                                    isVisible: e.target.checked
+                                  }
+                                }
+                              })}
+                            />
+                            <span className="text-sm font-bold text-zinc-700">Visible</span>
+                          </label>
                         </div>
                       </div>
                     ))}

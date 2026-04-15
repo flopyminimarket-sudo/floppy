@@ -59,6 +59,8 @@ export const POS = () => {
 
     // First try exact barcode match
     let product = products.find(p => {
+      const isVisible = p.branchData?.[currentBranch?.id || '']?.isVisible !== false;
+      if (!isVisible) return false;
       const internalBarcode = generateBarcode(p.id);
       return p.barcode?.trim() === cleanInput || (!p.barcode && internalBarcode === cleanInput.toUpperCase());
     });
@@ -249,14 +251,20 @@ export const POS = () => {
     }
   };
 
-  const filteredProducts = products.filter(p => 
-    (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (p.barcode || '').includes(searchTerm)
-  );
+  const filteredProducts = products.filter(p => {
+    const isVisible = p.branchData?.[currentBranch?.id || '']?.isVisible !== false;
+    return isVisible && (
+      (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (p.barcode || '').includes(searchTerm)
+    );
+  });
 
   // Productos del modal filtrados: si el admin autorizó IDs específicos, usar esos; si no, filtrar por categoría
   const comboModalProducts = comboSelectionModal
     ? products.filter(p => {
+        const isVisible = p.branchData?.[currentBranch?.id || '']?.isVisible !== false;
+        if (!isVisible) return false;
+
         const { allowedProductIds, category } = comboSelectionModal.selectableItem;
         const matchSearch = comboSelectionModal.searchFilter
           ? (p.name?.toLowerCase() || '').includes(comboSelectionModal.searchFilter.toLowerCase())

@@ -42,6 +42,7 @@ export interface Product {
     price: number;
     offerPrice?: number;
     stock: number;
+    isVisible: boolean;
   }>;
   // For convenience in components (current branch data)
   price: number;

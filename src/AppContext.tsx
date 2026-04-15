@@ -176,7 +176,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             branch_id,
             quantity,
             price,
-            offer_price
+            offer_price,
+            is_visible
           ),
           combo_items!combo_product_id (
             id,
@@ -193,14 +194,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let loadedProducts: Product[] = [];
       if (productsData) {
         loadedProducts = productsData.map(p => {
-          const branchData: Record<string, { price: number; offerPrice?: number; stock: number }> = {};
+          const branchData: Record<string, { price: number; offerPrice?: number; stock: number; isVisible: boolean }> = {};
           const stockRecord: Record<string, number> = {};
           
           p.product_stock?.forEach((item: any) => {
             branchData[item.branch_id] = {
               price: item.price || p.price,
               offerPrice: item.offer_price || p.offer_price,
-              stock: item.quantity
+              stock: item.quantity,
+              isVisible: item.is_visible !== false
             };
             stockRecord[item.branch_id] = item.quantity;
           });
@@ -209,7 +211,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const currentData = branchData[currentBranch.id] || { 
             price: p.price, 
             offerPrice: p.offer_price, 
-            stock: 0 
+            stock: 0,
+            isVisible: true
           };
 
           return {
@@ -1029,7 +1032,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         branch_id: branchId,
         quantity: bData.stock,
         price: bData.price,
-        offer_price: bData.offerPrice
+        offer_price: bData.offerPrice,
+        is_visible: (bData as any).isVisible !== false
       }));
 
       if (branchInserts.length > 0) {
@@ -1049,7 +1053,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await supabase.from('combo_items').insert(comboInserts);
       }
 
-      const currentData = product.branchData[currentBranch!.id] || { price: 0, offerPrice: undefined, stock: 0 };
+      const currentData = product.branchData[currentBranch!.id] || { price: 0, offerPrice: undefined, stock: 0, isVisible: true };
       const stockRecord: Record<string, number> = {};
       Object.entries(product.branchData).forEach(([bid, bData]) => {
         stockRecord[bid] = bData.stock;
@@ -1117,7 +1121,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               branch_id: branchId,
               quantity: data.stock,
               price: data.price,
-              offer_price: data.offerPrice
+              offer_price: data.offerPrice,
+              is_visible: (data as any).isVisible !== false
             }, { onConflict: 'product_id,branch_id' });
           if (error) throw error;
         }
@@ -1145,7 +1150,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProducts(prev => prev.map(p => {
         if (p.id === id) {
           const newBranchData = updates.branchData || p.branchData;
-          const currentData = newBranchData[currentBranch!.id] || { price: 0, offerPrice: undefined, stock: 0 };
+          const currentData = newBranchData[currentBranch!.id] || { price: 0, offerPrice: undefined, stock: 0, isVisible: true };
           const stockRecord: Record<string, number> = {};
           Object.entries(newBranchData).forEach(([bid, bData]) => {
             stockRecord[bid] = (bData as any).stock;
