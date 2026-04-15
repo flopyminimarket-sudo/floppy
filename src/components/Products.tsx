@@ -155,7 +155,9 @@ export const Products = () => {
           id: crypto.randomUUID(),
           comboProductId: editingProduct?.id || '',
           componentProductId: component.id,
-          quantity: 1
+          quantity: 1,
+          isSelectable: false,
+          allowedProductIds: []
         }
       ]
     });

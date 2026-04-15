@@ -185,7 +185,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             component_product_id,
             quantity,
             is_selectable,
-            selectable_category
+            selectable_category,
+            allowed_product_ids
           )
         `);
         
@@ -237,7 +238,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               componentProductId: ci.component_product_id,
               quantity: ci.quantity,
               isSelectable: ci.is_selectable || false,
-              selectableCategory: ci.selectable_category || undefined
+              selectableCategory: ci.selectable_category || undefined,
+              allowedProductIds: ci.allowed_product_ids || []
             })) || [],
             branchData,
             price: currentData.price,
@@ -1048,9 +1050,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           component_product_id: item.componentProductId,
           quantity: item.quantity,
           is_selectable: item.isSelectable || false,
-          selectable_category: item.selectableCategory || null
+          selectable_category: item.selectableCategory || null,
+          allowed_product_ids: Array.isArray(item.allowedProductIds) ? item.allowedProductIds : []
         }));
-        await supabase.from('combo_items').insert(comboInserts);
+        const { error: comboError } = await supabase.from('combo_items').insert(comboInserts);
+        if (comboError) {
+          console.error('Error inserting combo items:', comboError);
+          // Don't throw here to avoid failing entire product creation, but log it
+        }
       }
 
       const currentData = product.branchData[currentBranch!.id] || { price: 0, offerPrice: undefined, stock: 0, isVisible: true };
@@ -1130,7 +1137,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Sync combo items
       if (updates.isCombo !== undefined || updates.comboItems !== undefined) {
-        await supabase.from('combo_items').delete().eq('combo_product_id', id);
+        // First delete existing items
+        const { error: deleteError } = await supabase.from('combo_items').delete().eq('combo_product_id', id);
+        if (deleteError) {
+          console.error('Error deleting combo items:', deleteError);
+        }
         
         const currentIsCombo = updates.isCombo ?? products.find(p => p.id === id)?.isCombo;
         const comboToUse = updates.comboItems ?? products.find(p => p.id === id)?.comboItems ?? [];
@@ -1141,9 +1152,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             component_product_id: item.componentProductId,
             quantity: item.quantity,
             is_selectable: item.isSelectable || false,
-            selectable_category: item.selectableCategory || null
+            selectable_category: item.selectableCategory || null,
+            allowed_product_ids: Array.isArray(item.allowedProductIds) ? item.allowedProductIds : []
           }));
-          await supabase.from('combo_items').insert(comboInserts);
+          const { error: insertError } = await supabase.from('combo_items').insert(comboInserts);
+          if (insertError) {
+            console.error('Error inserting combo items during update:', insertError);
+          }
         }
       }
 
