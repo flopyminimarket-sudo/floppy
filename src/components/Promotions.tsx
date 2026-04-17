@@ -339,7 +339,7 @@ export const Promotions = () => {
                         className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder="0"
                         value={form.discountPrice ?? ''}
-                        onChange={e => setForm({ ...form, discountPrice: parseFloat(e.target.value) || undefined })}
+                        onChange={e => setForm({ ...form, discountPrice: e.target.value ? Math.round(parseFloat(e.target.value)) : undefined })}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">

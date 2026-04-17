@@ -201,8 +201,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           
           p.product_stock?.forEach((item: any) => {
             branchData[item.branch_id] = {
-              price: item.price || p.price,
-              offerPrice: item.offer_price || p.offer_price,
+              price: Math.round(item.price || p.price || 0),
+              offerPrice: (item.offer_price || p.offer_price) ? Math.round(item.offer_price || p.offer_price) : undefined,
               stock: item.quantity,
               isVisible: item.is_visible !== false
             };
@@ -211,8 +211,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           
           // Current branch data
           const currentData = branchData[currentBranch.id] || { 
-            price: p.price, 
-            offerPrice: p.offer_price, 
+            price: Math.round(p.price || 0), 
+            offerPrice: p.offer_price ? Math.round(p.offer_price) : undefined, 
             stock: 0,
             isVisible: true
           };
@@ -265,7 +265,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           productId: pr.product_id,
           buyQuantity: pr.buy_quantity,
           getQuantity: pr.get_quantity,
-          discountPrice: pr.discount_price,
+          discountPrice: pr.discount_price ? Math.round(pr.discount_price) : undefined,
           startDate: pr.start_date,
           endDate: pr.end_date,
           startTime: pr.start_time,
@@ -1106,7 +1106,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           allow_negative_stock: product.allowNegativeStock ?? false,
           is_combo: product.isCombo ?? false,
           min_stock: product.minStock ?? 5,
-          price: defaultPrice
+          price: Math.round(defaultPrice)
         })
         .select()
         .single();
@@ -1118,8 +1118,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         product_id: data.id,
         branch_id: branchId,
         quantity: bData.stock,
-        price: bData.price,
-        offer_price: bData.offerPrice,
+        price: Math.round(bData.price),
+        offer_price: bData.offerPrice ? Math.round(bData.offerPrice) : null,
         is_visible: (bData as any).isVisible !== false
       }));
 
@@ -1191,7 +1191,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (updates.branchData) {
         const branchPrices = Object.values(updates.branchData).map(b => b.price);
         if (branchPrices.length > 0) {
-          dbUpdates.price = branchPrices[0];
+          dbUpdates.price = Math.round(branchPrices[0]);
         }
       }
 
@@ -1212,8 +1212,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               product_id: id,
               branch_id: branchId,
               quantity: data.stock,
-              price: data.price,
-              offer_price: data.offerPrice,
+              price: Math.round(data.price),
+              offer_price: data.offerPrice ? Math.round(data.offerPrice) : null,
               is_visible: (data as any).isVisible !== false
             }, { onConflict: 'product_id,branch_id' });
           if (error) throw error;
@@ -1259,8 +1259,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return {
             ...p,
             ...updates,
-            price: currentData.price,
-            offerPrice: currentData.offerPrice,
+            price: Math.round(currentData.price),
+            offerPrice: currentData.offerPrice ? Math.round(currentData.offerPrice) : undefined,
             stock: stockRecord
           };
         }
@@ -1351,7 +1351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           product_id: promo.productId,
           buy_quantity: promo.buyQuantity ?? null,
           get_quantity: promo.getQuantity ?? null,
-          discount_price: promo.discountPrice ?? null,
+          discount_price: promo.discountPrice ? Math.round(promo.discountPrice) : null,
           start_date: promo.startDate ?? null,
           end_date: promo.endDate ?? null,
           start_time: promo.startTime ?? null,
@@ -1387,7 +1387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
       if (updates.buyQuantity !== undefined) dbUpdates.buy_quantity = updates.buyQuantity;
       if (updates.getQuantity !== undefined) dbUpdates.get_quantity = updates.getQuantity;
-      if (updates.discountPrice !== undefined) dbUpdates.discount_price = updates.discountPrice;
+      if (updates.discountPrice !== undefined) dbUpdates.discount_price = updates.discountPrice ? Math.round(updates.discountPrice) : null;
       if (updates.startDate !== undefined) dbUpdates.start_date = updates.startDate;
       if (updates.endDate !== undefined) dbUpdates.end_date = updates.endDate;
       if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;

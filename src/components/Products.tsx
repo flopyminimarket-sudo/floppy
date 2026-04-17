@@ -301,8 +301,8 @@ export const Products = () => {
           
           branches.forEach(branch => {
             branchData[branch.id] = {
-              price: parseFloat(row[`Precio (${branch.name})`] || row['Precio'] || '0') || 0,
-              offerPrice: row[`Oferta (${branch.name})`] ? parseFloat(row[`Oferta (${branch.name})`]) : undefined,
+              price: Math.round(parseFloat(row[`Precio (${branch.name})`] || row['Precio'] || '0') || 0),
+              offerPrice: row[`Oferta (${branch.name})`] ? Math.round(parseFloat(row[`Oferta (${branch.name})`])) : undefined,
               stock: parseFloat(row[`Stock (${branch.name})`] || row['Stock'] || '0') || 0
             };
           });
@@ -1096,7 +1096,7 @@ export const Products = () => {
                           ...formData.branchData,
                           [currentBranch?.id || '']: {
                             ...(formData.branchData[currentBranch?.id || ''] || { stock: '0' }),
-                            price: e.target.value
+                            price: e.target.value ? Math.round(parseFloat(e.target.value)).toString() : ''
                           }
                         }
                       })} 
@@ -1116,7 +1116,7 @@ export const Products = () => {
                           ...formData.branchData,
                           [currentBranch?.id || '']: {
                             ...(formData.branchData[currentBranch?.id || ''] || { stock: '0' }),
-                            offerPrice: e.target.value
+                            offerPrice: e.target.value ? Math.round(parseFloat(e.target.value)).toString() : ''
                           }
                         }
                       })} 
@@ -1189,7 +1189,10 @@ export const Products = () => {
                                 ...formData, 
                                 branchData: {
                                   ...formData.branchData,
-                                  [branch.id]: { ...formData.branchData[branch.id], price: e.target.value }
+                                  [branch.id]: { 
+                                    ...formData.branchData[branch.id], 
+                                    price: e.target.value ? Math.round(parseFloat(e.target.value)).toString() : '' 
+                                  }
                                 }
                               })}
                             />
@@ -1204,7 +1207,10 @@ export const Products = () => {
                                 ...formData, 
                                 branchData: {
                                   ...formData.branchData,
-                                  [branch.id]: { ...formData.branchData[branch.id], offerPrice: e.target.value }
+                                  [branch.id]: { 
+                                    ...formData.branchData[branch.id], 
+                                    offerPrice: e.target.value ? Math.round(parseFloat(e.target.value)).toString() : '' 
+                                  }
                                 }
                               })}
                             />
