@@ -49,7 +49,7 @@ export const MainLayout = () => {
     { id: 'promotions', label: 'Promociones', icon: Percent, roles: ['root', 'admin'] },
     { id: 'inventory', label: 'Inventario', icon: History, roles: ['root', 'admin', 'stocker'] },
     { id: 'products', label: 'Productos', icon: Package, roles: ['root', 'admin', 'stocker'] },
-    { id: 'labels', label: 'Etiquetas', icon: Barcode, roles: ['root', 'admin', 'cashier', 'stocker'] },
+    { id: 'labels', label: 'Etiquetas', icon: Barcode, roles: ['root', 'admin', 'stocker'] },
     { id: 'branches', label: 'Sucursales', icon: Store, roles: ['root', 'admin'] },
     { id: 'suppliers', label: 'Proveedores', icon: Truck, roles: ['root', 'admin'] },
     { id: 'users', label: 'Usuarios', icon: UsersIcon, roles: ['root', 'admin'] },
