@@ -188,7 +188,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             selectable_category,
             allowed_product_ids
           )
-        `);
+        `)
+        .limit(2000);
         
       if (productsError) throw productsError;
 
@@ -368,6 +369,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchBranchData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+        fetchBranchData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_movements' }, () => {
         fetchBranchData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'company_settings' }, () => {
@@ -713,35 +717,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Aplicar restauraciones en paralelo
       const restorePromises = Object.entries(stockRestorations).map(async ([productId, qtyToRestore]) => {
-        const { data: currentStockData } = await supabase
-          .from('product_stock')
-          .select('quantity, price, offer_price')
-          .eq('product_id', productId)
-          .eq('branch_id', currentBranch.id)
-          .single();
+        try {
+          const { data: currentStockData, error: stockFetchError } = await supabase
+            .from('product_stock')
+            .select('quantity, price, offer_price')
+            .eq('product_id', productId)
+            .eq('branch_id', currentBranch.id)
+            .maybeSingle();
 
-        const currentStock = currentStockData?.quantity || 0;
+          if (stockFetchError) throw stockFetchError;
 
-        await supabase
-          .from('product_stock')
-          .upsert({
-            product_id: productId,
-            branch_id: currentBranch.id,
-            quantity: currentStock + qtyToRestore,
-            price: currentStockData?.price,
-            offer_price: currentStockData?.offer_price
-          }, { onConflict: 'product_id,branch_id' });
+          const currentStock = currentStockData?.quantity || 0;
 
-        await supabase
-          .from('inventory_movements')
-          .insert({
-            product_id: productId,
-            type: 'in',
-            quantity: qtyToRestore,
-            reason: `Anulación Venta #${saleId}: ${reason}`,
-            user_id: currentUser.id,
-            branch_id: currentBranch.id
-          });
+          const { error: upsertError } = await supabase
+            .from('product_stock')
+            .upsert({
+              product_id: productId,
+              branch_id: currentBranch.id,
+              quantity: currentStock + qtyToRestore,
+              price: currentStockData?.price,
+              offer_price: currentStockData?.offer_price,
+              is_visible: true
+            }, { onConflict: 'product_id,branch_id' });
+
+          if (upsertError) throw upsertError;
+
+          const { error: mvError } = await supabase
+            .from('inventory_movements')
+            .insert({
+              product_id: productId,
+              type: 'in',
+              quantity: qtyToRestore,
+              reason: `Anulación Venta #${saleId}: ${reason}`,
+              user_id: currentUser.id,
+              branch_id: currentBranch.id
+            });
+            
+          if (mvError) throw mvError;
+        } catch (err) {
+          console.error(`Error restoring stock for product ${productId}:`, err);
+        }
       });
 
       await Promise.all(restorePromises);
@@ -776,14 +791,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) return;
     
     try {
-      // Get current stocks
-      const { data: fromStockData } = await supabase
+      console.log(`Transferring ${quantity} of product ${productId} from ${fromBranchId} to ${toBranchId}`);
+
+      // Get current stocks from DB to ensure accuracy
+      const { data: fromStockData, error: fromError } = await supabase
         .from('product_stock')
         .select('quantity')
         .eq('product_id', productId)
         .eq('branch_id', fromBranchId)
-        .single();
+        .maybeSingle();
         
+      if (fromError) throw fromError;
       const fromStock = fromStockData?.quantity || 0;
       
       if (fromStock < quantity) {
@@ -791,17 +809,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      const { data: toStockData } = await supabase
+      const { data: toStockData, error: toError } = await supabase
         .from('product_stock')
         .select('quantity')
         .eq('product_id', productId)
         .eq('branch_id', toBranchId)
-        .single();
+        .maybeSingle();
         
+      if (toError) throw toError;
       const toStock = toStockData?.quantity || 0;
 
       // Update from branch
-      await supabase
+      const { error: upsertFromError } = await supabase
         .from('product_stock')
         .upsert({
           product_id: productId,
@@ -809,17 +828,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           quantity: fromStock - quantity
         }, { onConflict: 'product_id,branch_id' });
 
-      // Update to branch
-      await supabase
+      if (upsertFromError) throw upsertFromError;
+
+      // Update to branch - Also ensure visibility
+      const { error: upsertToError } = await supabase
         .from('product_stock')
         .upsert({
           product_id: productId,
           branch_id: toBranchId,
-          quantity: toStock + quantity
+          quantity: toStock + quantity,
+          is_visible: true
         }, { onConflict: 'product_id,branch_id' });
 
+      if (upsertToError) throw upsertToError;
+
       // Record movement
-      const { data: mvData } = await supabase
+      const { data: mvData, error: mvError } = await supabase
         .from('inventory_movements')
         .insert({
           product_id: productId,
@@ -833,6 +857,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .select()
         .single();
       
+      if (mvError) throw mvError;
+
       if (mvData) {
         setMovements(prev => [{
           id: mvData.id,
@@ -847,15 +873,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }, ...prev]);
       }
 
-      // Update local state
+      // Update local state robustly
       setProducts(prev => prev.map(p => {
         if (p.id === productId) {
           const updatedBranchData = { ...p.branchData };
+          
+          // Update FROM branch
           if (updatedBranchData[fromBranchId]) {
-            updatedBranchData[fromBranchId] = { ...updatedBranchData[fromBranchId], stock: fromStock - quantity };
+            updatedBranchData[fromBranchId] = { 
+              ...updatedBranchData[fromBranchId], 
+              stock: fromStock - quantity 
+            };
+          } else {
+            updatedBranchData[fromBranchId] = {
+              branchId: fromBranchId,
+              stock: fromStock - quantity,
+              isVisible: true,
+              price: p.price,
+              offerPrice: p.offerPrice
+            };
           }
+
+          // Update TO branch
           if (updatedBranchData[toBranchId]) {
-            updatedBranchData[toBranchId] = { ...updatedBranchData[toBranchId], stock: toStock + quantity };
+            updatedBranchData[toBranchId] = { 
+              ...updatedBranchData[toBranchId], 
+              stock: toStock + quantity,
+              isVisible: true 
+            };
+          } else {
+            updatedBranchData[toBranchId] = {
+              branchId: toBranchId,
+              stock: toStock + quantity,
+              isVisible: true,
+              price: p.price,
+              offerPrice: p.offerPrice
+            };
           }
 
           return {
@@ -885,12 +938,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const oldStock = product?.stock?.[branchId] ?? 0;
       const diff = newQuantity - oldStock;
 
-      await supabase
+      const { error: upsertError } = await supabase
         .from('product_stock')
-        .upsert({ product_id: productId, branch_id: branchId, quantity: newQuantity },
-          { onConflict: 'product_id,branch_id' });
+        .upsert({ 
+          product_id: productId, 
+          branch_id: branchId, 
+          quantity: newQuantity,
+          is_visible: true
+        }, { onConflict: 'product_id,branch_id' });
 
-      const { data: mvData } = await supabase
+      if (upsertError) throw upsertError;
+
+      const { data: mvData, error: mvError } = await supabase
         .from('inventory_movements')
         .insert({
           product_id: productId,
@@ -902,6 +961,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .select()
         .single();
+
+      if (mvError) throw mvError;
 
       if (mvData) {
         setMovements(prev => [{
@@ -920,7 +981,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (p.id === productId) {
           const updatedBranchData = { ...p.branchData };
           if (updatedBranchData[branchId]) {
-            updatedBranchData[branchId] = { ...updatedBranchData[branchId], stock: newQuantity };
+            updatedBranchData[branchId] = { ...updatedBranchData[branchId], stock: newQuantity, isVisible: true };
+          } else {
+            updatedBranchData[branchId] = {
+              branchId,
+              stock: newQuantity,
+              isVisible: true,
+              price: p.price,
+              offerPrice: p.offerPrice
+            };
           }
           return { 
             ...p, 
@@ -945,12 +1014,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentStock = product?.stock?.[branchId] ?? 0;
       const newStock = currentStock + quantity;
 
-      await supabase
+      const { error: upsertError } = await supabase
         .from('product_stock')
-        .upsert({ product_id: productId, branch_id: branchId, quantity: newStock },
-          { onConflict: 'product_id,branch_id' });
+        .upsert({ 
+          product_id: productId, 
+          branch_id: branchId, 
+          quantity: newStock,
+          is_visible: true
+        }, { onConflict: 'product_id,branch_id' });
 
-      const { data: mvData } = await supabase
+      if (upsertError) throw upsertError;
+
+      const { data: mvData, error: mvError } = await supabase
         .from('inventory_movements')
         .insert({
           product_id: productId,
@@ -962,6 +1037,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .select()
         .single();
+
+      if (mvError) throw mvError;
 
       if (mvData) {
         setMovements(prev => [{
@@ -980,7 +1057,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (p.id === productId) {
           const updatedBranchData = { ...p.branchData };
           if (updatedBranchData[branchId]) {
-            updatedBranchData[branchId] = { ...updatedBranchData[branchId], stock: newStock };
+            updatedBranchData[branchId] = { ...updatedBranchData[branchId], stock: newStock, isVisible: true };
+          } else {
+            updatedBranchData[branchId] = {
+              branchId,
+              stock: newStock,
+              isVisible: true,
+              price: p.price,
+              offerPrice: p.offerPrice
+            };
           }
           return { 
             ...p, 
