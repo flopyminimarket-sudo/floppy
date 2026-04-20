@@ -276,14 +276,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Fetch sales
-      const { data: salesData } = await supabase
+      let salesQuery = supabase
         .from('sales')
         .select(`
           *,
           sale_items (*)
-        `)
-        .eq('branch_id', currentBranch.id)
-        .order('date', { ascending: false });
+        `);
+      
+      // If user is admin/superadmin/root, show all sales. Otherwise, restrict to current branch.
+      if (currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'root') {
+        salesQuery = salesQuery.eq('branch_id', currentBranch.id);
+      }
+      
+      const { data: salesData } = await salesQuery.order('date', { ascending: false });
 
       if (salesData) {
         const formattedSales: Sale[] = salesData.map(s => ({

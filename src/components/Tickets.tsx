@@ -10,7 +10,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const Tickets = () => {
-  const { sales, branches, users, voidSale, companySettings, currentBranch } = useApp();
+  const { sales, branches, users, voidSale, companySettings, currentBranch, currentUser } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
@@ -63,8 +63,8 @@ export const Tickets = () => {
     
     // Mostrar Rango de Fechas
     if (filterDate || filterDateEnd) {
-      const desde = filterDate ? new Date(filterDate).toLocaleDateString('es-ES') : 'Inicio';
-      const hasta = filterDateEnd ? new Date(filterDateEnd).toLocaleDateString('es-ES') : 'Hoy';
+      const desde = filterDate ? new Date(filterDate + 'T00:00:00').toLocaleDateString('es-ES') : 'Inicio';
+      const hasta = filterDateEnd ? new Date(filterDateEnd + 'T00:00:00').toLocaleDateString('es-ES') : 'Hoy';
       doc.text(`Rango de Fechas: ${desde} - ${hasta}`, 14, currentY);
       currentY += 7;
     } else {
@@ -167,6 +167,116 @@ export const Tickets = () => {
     doc.save(`resumen_ventas_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
+  const exportCategorySummaryToPDF = () => {
+    const doc = new jsPDF();
+    
+    // Logo y Encabezado
+    doc.setFontSize(22);
+    doc.setTextColor(37, 99, 235);
+    doc.text(companySettings.name, 105, 20, { align: 'center' });
+    
+    doc.setFontSize(16);
+    doc.setTextColor(24, 24, 27);
+    doc.text('Informe de Ventas por Categoría', 105, 30, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setTextColor(113, 113, 122);
+    doc.text(`Generado el: ${new Date().toLocaleString('es-ES')}`, 105, 37, { align: 'center' });
+    
+    doc.line(14, 45, 196, 45);
+
+    let currentY = 55;
+
+    // Sucursal y Fecha
+    const activeBranchName = filterBranchId 
+      ? getBranchName(filterBranchId) 
+      : (currentBranch?.name || 'Todas las Sucursales');
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Sucursal: ${activeBranchName}`, 14, currentY);
+    currentY += 7;
+
+    const desde = filterDate ? new Date(filterDate + 'T00:00:00').toLocaleDateString('es-ES') : 'Inicio';
+    const hasta = filterDateEnd ? new Date(filterDateEnd + 'T00:00:00').toLocaleDateString('es-ES') : 'Hoy';
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Rango de Fechas: ${desde} - ${hasta}`, 14, currentY);
+    currentY += 10;
+
+    // Agrupar por categoría
+    const categoryGroups: Record<string, Record<string, { name: string, price: number, quantity: number, total: number }>> = {};
+
+    filteredSales.forEach(sale => {
+      if (sale.status === 'voided') return;
+      
+      sale.items?.forEach(item => {
+        const cat = item.category || 'Sin Categoría';
+        const prodKey = item.id;
+        
+        if (!categoryGroups[cat]) {
+          categoryGroups[cat] = {};
+        }
+        
+        if (!categoryGroups[cat][prodKey]) {
+          categoryGroups[cat][prodKey] = {
+            name: item.name,
+            price: item.offerPrice || item.price,
+            quantity: 0,
+            total: 0
+          };
+        }
+        
+        categoryGroups[cat][prodKey].quantity += item.quantity;
+        categoryGroups[cat][prodKey].total += (item.offerPrice || item.price) * item.quantity;
+      });
+    });
+
+    const categories = Object.keys(categoryGroups).sort();
+
+    if (categories.length === 0) {
+      doc.text('No hay ventas registradas en este periodo.', 14, currentY);
+    } else {
+      categories.forEach((cat) => {
+        // Título de Categoría
+        if (currentY > 260) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        const products = Object.values(categoryGroups[cat]).sort((a, b) => b.total - a.total);
+        const tableData = products.map(p => [
+          p.name,
+          formatCurrency(p.price),
+          p.quantity.toString(),
+          formatCurrency(p.total)
+        ]);
+
+        const catTotal = products.reduce((acc, p) => acc + p.total, 0);
+
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(37, 99, 235);
+        doc.text(`Categoría: ${cat.toUpperCase()}`, 14, currentY);
+        
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: [['Producto', 'Precio Unit.', 'Cant. Vendida', 'Total Venta']],
+          body: tableData,
+          foot: [['Total Categoría', '', '', formatCurrency(catTotal)]],
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [71, 85, 105], textColor: 255 },
+          footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+          margin: { left: 14, right: 14 }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      });
+    }
+
+    doc.save(`ventas_por_categoria_${activeBranchName}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   const handleVoid = async () => {
     if (!selectedTicket || !voidReason.trim()) return;
     
@@ -189,7 +299,8 @@ export const Tickets = () => {
     
     // Lógica de rango de fechas
     let matchesDate = true;
-    const saleDate = sale.date.split('T')[0]; // YYYY-MM-DD
+    const dateObj = new Date(sale.date);
+    const saleDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`; // YYYY-MM-DD local
     
     if (filterDate && filterDateEnd) {
       matchesDate = saleDate >= filterDate && saleDate <= filterDateEnd;
@@ -200,8 +311,8 @@ export const Tickets = () => {
     }
 
     const matchesPayment = filterPaymentMethod ? sale.paymentMethod === filterPaymentMethod : true;
-    const matchesBranch = filterBranchId ? sale.branchId === filterBranchId : true;
-    const matchesCashier = filterCashierId ? sale.cashierId === filterCashierId : true;
+    const matchesBranch = filterBranchId ? String(sale.branchId) === String(filterBranchId) : true;
+    const matchesCashier = filterCashierId ? String(sale.cashierId) === String(filterCashierId) : true;
 
     return matchesSearch && matchesDate && matchesPayment && matchesBranch && matchesCashier;
   });
@@ -278,13 +389,24 @@ export const Tickets = () => {
               </h1>
               <p className="text-zinc-500 font-medium mt-1">Historial completo de ventas y recibos</p>
             </div>
-            <button 
-              onClick={exportToPDF}
-              className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-bold hover:bg-zinc-800 transition-colors shadow-sm"
-            >
-              <Download className="w-5 h-5" />
-              Exportar PDF
-            </button>
+            <div className="flex items-center gap-3">
+              {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'root') && (
+                <button 
+                  onClick={exportCategorySummaryToPDF}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Package className="w-5 h-5" />
+                  Informe por Categoría
+                </button>
+              )}
+              <button 
+                onClick={exportToPDF}
+                className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-bold hover:bg-zinc-800 transition-colors shadow-sm"
+              >
+                <Download className="w-5 h-5" />
+                Exportar PDF
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3 items-center bg-white p-3 rounded-[14px] border border-zinc-200 shadow-sm shrink-0">
