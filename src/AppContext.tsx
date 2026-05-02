@@ -276,19 +276,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Fetch sales
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
       let salesQuery = supabase
         .from('sales')
         .select(`
           *,
           sale_items (*)
-        `);
+        `)
+        .gte('date', sevenDaysAgo.toISOString());
       
       // If user is admin/superadmin/root, show all sales. Otherwise, restrict to current branch.
       if (currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'root') {
         salesQuery = salesQuery.eq('branch_id', currentBranch.id);
       }
       
-      const { data: salesData } = await salesQuery.order('date', { ascending: false });
+      const { data: salesData, error: salesError } = await salesQuery.order('date', { ascending: false }).limit(2000);
+
+      if (salesError) {
+        console.error('Error fetching sales:', salesError);
+      }
 
       if (salesData) {
         const formattedSales: Sale[] = salesData.map(s => ({
