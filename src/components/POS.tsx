@@ -657,7 +657,7 @@ export const POS = () => {
               </div>
             </div>
 
-            {cart.some(item => item.category?.toUpperCase() === 'COMIDA RAPIDA' || item.category?.toUpperCase() === 'COMIDA RÁPIDA') && (
+            {(isEmployeeMode || cart.some(item => item.category?.toUpperCase() === 'COMIDA RAPIDA' || item.category?.toUpperCase() === 'COMIDA RÁPIDA')) && (
               <div className="w-full relative group animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-blue-500 transition-colors">
                   <User className="w-4 h-4" />
@@ -666,12 +666,18 @@ export const POS = () => {
                   type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="NOMBRE CLIENTE (PEDIR AL CLIENTE)"
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border-2 border-transparent focus:border-blue-500 rounded-lg py-2.5 pl-10 pr-3 text-sm text-zinc-900 dark:text-zinc-100 font-black placeholder-zinc-400 outline-none transition-all uppercase"
+                  placeholder={isEmployeeMode ? "NOMBRE DEL EMPLEADO" : "NOMBRE CLIENTE (PEDIR AL CLIENTE)"}
+                  className={cn(
+                    "w-full bg-zinc-50 dark:bg-zinc-800 border-2 rounded-lg py-2.5 pl-10 pr-3 text-sm text-zinc-900 dark:text-zinc-100 font-black outline-none transition-all uppercase",
+                    isEmployeeMode ? "border-amber-400/50 focus:border-amber-500 placeholder-amber-600/50" : "border-transparent focus:border-blue-500 placeholder-zinc-400"
+                  )}
                 />
                 {!customerName && (
-                  <div className="absolute -top-6 left-0 text-[10px] font-black text-blue-600 dark:text-blue-400 animate-pulse uppercase tracking-wider">
-                    ¡Preguntar nombre! ☝️
+                  <div className={cn(
+                    "absolute -top-6 left-0 text-[10px] font-black animate-pulse uppercase tracking-wider",
+                    isEmployeeMode ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"
+                  )}>
+                    {isEmployeeMode ? "¡Ingresar nombre del empleado! ☝️" : "¡Preguntar nombre! ☝️"}
                   </div>
                 )}
               </div>
@@ -702,7 +708,7 @@ export const POS = () => {
             </div>
 
             <button
-              disabled={cart.length === 0 || !selectedPaymentMethod}
+              disabled={cart.length === 0 || !selectedPaymentMethod || (isEmployeeMode && !customerName.trim())}
               onClick={handleProcessSale}
               className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-black text-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md active:scale-[0.99]"
             >
