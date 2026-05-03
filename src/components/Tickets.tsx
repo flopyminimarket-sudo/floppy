@@ -514,10 +514,13 @@ export const Tickets = () => {
                     sale.status === 'voided' && "bg-rose-50/30 hover:bg-rose-50/50"
                   )} onClick={() => setSelectedTicket(sale)}>
                     <td className="p-4">
-                      <div className="flex flex-col">
+                      <div className="flex flex-col items-start">
                         <span className="font-bold text-zinc-900">{sale.id}</span>
                         {sale.status === 'voided' && (
-                          <span className="text-[10px] font-black text-rose-600 uppercase tracking-tighter">ANULADO</span>
+                          <span className="text-[10px] font-black text-rose-600 uppercase tracking-tighter mt-1 bg-rose-50 px-1.5 py-0.5 rounded">ANULADO</span>
+                        )}
+                        {sale.isEmployeeSale && (
+                          <span className="text-[10px] font-black text-amber-600 uppercase tracking-tighter mt-1 bg-amber-50 px-1.5 py-0.5 rounded">EMPLEADO</span>
                         )}
                       </div>
                     </td>

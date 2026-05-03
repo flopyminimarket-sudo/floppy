@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../AppContext';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun, Layers, User } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Barcode, Printer, Bluetooth, BluetoothConnected, Usb, Package, X, Bell, ChevronDown, DollarSign, ChevronRight, Moon, Sun, Layers, User, BadgePercent } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { printer } from '../lib/bluetoothPrinter';
@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import { Product } from '../types';
 
 export const POS = () => {
-  const { products, cart, addToCart, removeFromCart, updateCartQuantity, clearCart, updateCartNotes, processSale, currentBranch, branches, setCurrentBranch, companySettings, getActivePromotion, isDarkMode, toggleDarkMode } = useApp();
+  const { products, cart, addToCart, removeFromCart, updateCartQuantity, clearCart, updateCartNotes, updateCartEmployeePrice, processSale, currentBranch, branches, setCurrentBranch, companySettings, getActivePromotion, isDarkMode, toggleDarkMode } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [allowFlexibleSearch, setAllowFlexibleSearch] = useState(false);
@@ -90,6 +90,7 @@ export const POS = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
   const [customerName, setCustomerName] = useState('');
+  const [isEmployeeMode, setIsEmployeeMode] = useState(false);
 
   const handleProductClick = (product: any) => {
     if (product.saleType === 'weight') {
@@ -211,7 +212,7 @@ export const POS = () => {
   const handleProcessSale = async () => {
     if (!selectedPaymentMethod) return;
     try {
-      const sale = await processSale(selectedPaymentMethod, customerName);
+      const sale = await processSale(selectedPaymentMethod, customerName, isEmployeeMode);
       setSelectedPaymentMethod(null);
       setCustomerName(''); // Limpiar nombre después de venta
       
@@ -281,7 +282,10 @@ export const POS = () => {
       })
     : [];
 
-  const total = Math.round(cart.reduce((acc, item) => acc + (Math.round(item.offerPrice || item.price) * item.quantity), 0));
+  const total = Math.round(cart.reduce((acc, item) => {
+    const effectivePrice = (isEmployeeMode && item.employeePrice !== undefined) ? item.employeePrice : (item.offerPrice || item.price);
+    return acc + (Math.round(effectivePrice) * item.quantity);
+  }, 0));
 
   return (
     <>
@@ -492,12 +496,23 @@ export const POS = () => {
               <div>
                 <h2 className="text-lg font-black flex items-center gap-2 uppercase tracking-tight">
                   Nueva Orden
+                  {isEmployeeMode && <span className="text-[10px] bg-white text-blue-600 px-2 py-0.5 rounded-full uppercase tracking-widest font-black ml-2 shadow-sm">Empleado</span>}
                 </h2>
                 <p className="text-blue-100 text-xs font-bold mt-1 uppercase tracking-widest">
                   {new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
               </div>
               <div className="flex items-center gap-2 bg-white/10 p-1.5 rounded-xl backdrop-blur-sm">
+                <button
+                  onClick={() => setIsEmployeeMode(!isEmployeeMode)}
+                  className={cn(
+                    "p-2.5 rounded-lg transition-all",
+                    isEmployeeMode ? "bg-amber-400 text-amber-900 shadow-sm scale-110" : "text-blue-100 hover:bg-white/20"
+                  )}
+                  title={isEmployeeMode ? "Desactivar Modo Empleado" : "Activar Modo Empleado"}
+                >
+                  <BadgePercent className="w-4 h-4" />
+                </button>
                 <button
                   onClick={() => setAutoPrint(!autoPrint)}
                   className={cn(
@@ -562,7 +577,20 @@ export const POS = () => {
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 truncate uppercase">{item.name}</h4>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <p className="text-xs text-blue-600 font-black">{formatCurrency(item.offerPrice || item.price)}</p>
+                          {isEmployeeMode ? (
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="w-3 h-3 text-amber-500" />
+                              <input
+                                type="number"
+                                className="w-16 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-black text-xs px-1 py-0.5 rounded border border-amber-200 dark:border-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                value={item.employeePrice ?? item.offerPrice ?? item.price}
+                                onChange={(e) => updateCartEmployeePrice(item.id, Number(e.target.value))}
+                                onClick={(e) => (e.target as HTMLInputElement).select()}
+                              />
+                            </div>
+                          ) : (
+                            <p className="text-xs text-blue-600 font-black">{formatCurrency(item.offerPrice || item.price)}</p>
+                          )}
                           {item.isPack && (
                             <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase">Pack {item.packUnits}u</span>
                           )}
@@ -570,7 +598,7 @@ export const POS = () => {
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <span className="text-sm font-black text-zinc-900 dark:text-zinc-100">
-                          {formatCurrency((item.offerPrice || item.price) * item.quantity)}
+                          {formatCurrency(((isEmployeeMode && item.employeePrice !== undefined) ? item.employeePrice : (item.offerPrice || item.price)) * item.quantity)}
                         </span>
                         <div className="flex items-center bg-zinc-100 dark:bg-zinc-900 rounded-xl p-1">
                           <button 

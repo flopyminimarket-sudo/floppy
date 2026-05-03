@@ -86,6 +86,7 @@ export interface Promotion {
 export interface CartItem extends Product {
   quantity: number;
   notes?: string;
+  employeePrice?: number; // Custom price set in employee sale mode
 }
 
 export interface Sale {
@@ -101,6 +102,7 @@ export interface Sale {
   voidReason?: string;
   voidDate?: string;
   customerName?: string;
+  isEmployeeSale?: boolean;
 }
 
 export interface Supplier {

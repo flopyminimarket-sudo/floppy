@@ -30,7 +30,8 @@ interface AppContextType {
   updateCartQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
   updateCartNotes: (productId: string, notes: string) => void;
-  processSale: (paymentMethod: Sale['paymentMethod']) => Promise<Sale | null>;
+  updateCartEmployeePrice: (productId: string, price: number) => void;
+  processSale: (paymentMethod: Sale['paymentMethod'], customerName?: string, isEmployeeSale?: boolean) => Promise<Sale | null>;
   voidSale: (saleId: string, reason: string) => Promise<void>;
   transferStock: (productId: string, fromBranchId: string, toBranchId: string, quantity: number) => Promise<void>;
   adjustStock: (productId: string, branchId: string, newQuantity: number, reason: string) => Promise<void>;
@@ -309,6 +310,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: s.status || 'completed',
           voidReason: s.void_reason,
           voidDate: s.void_date,
+          customerName: s.customer_name,
+          isEmployeeSale: s.is_employee_sale || false,
           items: s.sale_items?.map((item: any) => {
             const product = loadedProducts.find(p => p.id === item.product_id);
             return {
@@ -551,7 +554,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCart(prev => prev.map(item => item.id === productId ? { ...item, notes } : item));
   };
 
-  const processSale = async (paymentMethod: 'cash' | 'card' | 'transfer' | 'amipass' | 'pluxe' | 'edenred', customerName?: string) => {
+  const updateCartEmployeePrice = (productId: string, price: number) => {
+    setCart(prev => prev.map(item => item.id === productId ? { ...item, employeePrice: price } : item));
+  };
+
+  const processSale = async (paymentMethod: 'cash' | 'card' | 'transfer' | 'amipass' | 'pluxe' | 'edenred', customerName?: string, isEmployeeSale?: boolean) => {
     try {
       if (cart.length === 0) return null;
 
@@ -560,8 +567,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const comboComponents = cart.filter(item => (item as any).isComboComponent);
 
       // Calcular total solo con ítems principales (los componentes van en $0)
+      // En modo empleado se usa employeePrice si está definido
       const totalValue = mainItems.reduce((acc, item) => {
-        const price = item.offerPrice || item.price;
+        const price = item.employeePrice ?? item.offerPrice ?? item.price;
         return acc + (Math.round(price) * item.quantity);
       }, 0);
       const total = Math.round(totalValue);
@@ -574,7 +582,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           payment_method: paymentMethod,
           cashier_id: currentUser?.id,
           branch_id: currentBranch?.id,
-          customer_name: customerName || null
+          customer_name: customerName || null,
+          is_employee_sale: isEmployeeSale || false
         })
         .select()
         .single();
@@ -582,13 +591,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saleError) throw saleError;
 
       // --- 2. Registrar todos los ítems de la venta ---
-      const saleItems = cart.map(item => ({
-        sale_id: saleData.id,
-        product_id: item.id,
-        quantity: item.quantity,
-        price: Math.round(item.offerPrice || item.price),
-        subtotal: Math.round((item.offerPrice || item.price) * item.quantity)
-      }));
+      const saleItems = cart.map(item => {
+        const effectivePrice = item.employeePrice ?? item.offerPrice ?? item.price;
+        return {
+          sale_id: saleData.id,
+          product_id: item.id,
+          quantity: item.quantity,
+          price: Math.round(effectivePrice),
+          subtotal: Math.round(effectivePrice * item.quantity)
+        };
+      });
 
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
@@ -659,7 +671,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cashierName: currentUser!.name,
         branchId: currentBranch!.id,
         status: 'completed',
-        customerName: customerName || undefined
+        customerName: customerName || undefined,
+        isEmployeeSale: isEmployeeSale || false
       };
 
       setSales(prev => [newSale, ...prev]);
@@ -1472,7 +1485,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       categories, setCategories,
       movements, setMovements,
       companySettings, setCompanySettings: updateCompanySettings,
-      cart, addToCart, removeFromCart, updateCartQuantity, clearCart, updateCartNotes, processSale, voidSale, transferStock, adjustStock, receiveStock,
+      cart, addToCart, removeFromCart, updateCartQuantity, clearCart, updateCartNotes, updateCartEmployeePrice, processSale, voidSale, transferStock, adjustStock, receiveStock,
       addProduct, updateProduct, deleteProduct,
       addCategory, updateCategory, deleteCategory,
       promotions, addPromotion, updatePromotion, deletePromotion, getActivePromotion,
