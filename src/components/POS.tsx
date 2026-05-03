@@ -215,6 +215,7 @@ export const POS = () => {
       const sale = await processSale(selectedPaymentMethod, customerName, isEmployeeMode);
       setSelectedPaymentMethod(null);
       setCustomerName(''); // Limpiar nombre después de venta
+      setIsEmployeeMode(false); // Limpiar modo empleado
       
       if (sale) {
         setLastSale(sale);
