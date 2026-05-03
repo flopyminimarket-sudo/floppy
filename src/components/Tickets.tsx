@@ -684,7 +684,7 @@ export const Tickets = () => {
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-6">
                 {/* Meta info */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div className={cn("grid gap-4 mb-8", selectedTicket.isEmployeeSale ? "grid-cols-2 md:grid-cols-5" : "grid-cols-2 md:grid-cols-4")}>
                   <div className="bg-zinc-50 p-4 rounded-[14px] border border-zinc-100">
                     <div className="flex items-center gap-2 text-zinc-500 mb-1">
                       <Calendar className="w-4 h-4" />
@@ -718,6 +718,15 @@ export const Tickets = () => {
                     </div>
                     <p className="font-semibold text-zinc-900 capitalize">{getPaymentName(selectedTicket.paymentMethod)}</p>
                   </div>
+                  {selectedTicket.isEmployeeSale && (
+                    <div className="bg-amber-50 p-4 rounded-[14px] border border-amber-200">
+                      <div className="flex items-center gap-2 text-amber-600 mb-1">
+                        <User className="w-4 h-4" />
+                        <span className="text-xs font-bold uppercase">Empleado</span>
+                      </div>
+                      <p className="font-semibold text-amber-900 uppercase">{selectedTicket.customerName || 'N/A'}</p>
+                    </div>
+                  )}
                 </div>
 
                 {selectedTicket.status === 'voided' && (
