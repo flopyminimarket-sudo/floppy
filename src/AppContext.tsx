@@ -322,7 +322,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               brand: item.brand || (product?.brand || ''),
               quantity: item.quantity || 0,
               price: item.price || 0,
-              saleType: item.sale_type || (product?.sale_type || 'unit'),
+              originalPrice: item.original_price || item.price || 0,
+              saleType: item.sale_type || (product?.saleType || 'unit'),
               imageUrl: product?.imageUrl
             } as CartItem;
           }) || []
@@ -334,7 +335,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .from('inventory_movements')
         .select('*')
         .or(`branch_id.eq.${currentBranch.id},to_branch_id.eq.${currentBranch.id}`)
-        .order('date', { ascending: false });
+        .order('date', { ascending: false })
+        .limit(200);
 
       if (movementsData) {
         const formattedMovements: InventoryMovement[] = movementsData.map(m => ({
@@ -370,25 +372,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!isConfigured) return;
 
+    // Debounce wrapper to avoid multiple sequential triggers on rapid DB edits (e.g. processing a sale)
+    let debounceTimeout: NodeJS.Timeout;
+    const triggerDebouncedFetch = () => {
+      clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        fetchBranchData();
+      }, 300);
+    };
+
     const channel = supabase
       .channel('app-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchBranchData();
+        triggerDebouncedFetch();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'product_stock' }, () => {
-        fetchBranchData();
+        triggerDebouncedFetch();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
         fetchInitialData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'promotions' }, () => {
-        fetchBranchData();
+        triggerDebouncedFetch();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
-        fetchBranchData();
+        triggerDebouncedFetch();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_movements' }, () => {
-        fetchBranchData();
+        triggerDebouncedFetch();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'company_settings' }, () => {
         fetchInitialData();
@@ -396,6 +407,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .subscribe();
 
     return () => {
+      clearTimeout(debounceTimeout);
       supabase.removeChannel(channel);
     };
   }, [isConfigured, currentBranch, currentUser]);
@@ -598,7 +610,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           product_id: item.id,
           quantity: item.quantity,
           price: Math.round(effectivePrice),
-          subtotal: Math.round(effectivePrice * item.quantity)
+          subtotal: Math.round(effectivePrice * item.quantity),
+          original_price: Math.round(item.offerPrice ?? item.price)
         };
       });
 
@@ -624,31 +637,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stockDeductions[item.id] = (stockDeductions[item.id] || 0) + item.quantity;
       }
 
-      // Aplicar descuentos de stock en paralelo
-      const stockUpdatePromises = Object.entries(stockDeductions).map(async ([productId, qtyToDeduct]) => {
-        const { data: currentStockData } = await supabase
+      const productIds = Object.keys(stockDeductions);
+      if (productIds.length > 0) {
+        // 3.1 Obtener stock actual de todos los productos en una sola consulta
+        const { data: currentStocksData, error: stockFetchError } = await supabase
           .from('product_stock')
-          .select('quantity, price, offer_price')
-          .eq('product_id', productId)
-          .eq('branch_id', currentBranch!.id)
-          .maybeSingle();
+          .select('product_id, quantity, price, offer_price')
+          .in('product_id', productIds)
+          .eq('branch_id', currentBranch!.id);
 
-        const currentStock = currentStockData?.quantity || 0;
-        const newStock = currentStock - qtyToDeduct;
+        if (stockFetchError) throw stockFetchError;
 
-        await supabase
-          .from('product_stock')
-          .upsert({
+        // Crear mapa para búsquedas rápidas
+        const stocksMap = (currentStocksData || []).reduce((acc: Record<string, any>, item: any) => {
+          acc[item.product_id] = item;
+          return acc;
+        }, {});
+
+        // Preparar arreglos para operaciones en lote
+        const upsertData: any[] = [];
+        const movementsData: any[] = [];
+
+        Object.entries(stockDeductions).forEach(([productId, qtyToDeduct]) => {
+          const stockRecord = stocksMap[productId];
+          const currentStock = stockRecord?.quantity || 0;
+          const newStock = currentStock - qtyToDeduct;
+
+          upsertData.push({
             product_id: productId,
             branch_id: currentBranch!.id,
             quantity: newStock,
-            price: currentStockData?.price,
-            offer_price: currentStockData?.offer_price
-          }, { onConflict: 'product_id,branch_id' });
+            price: stockRecord?.price || null,
+            offer_price: stockRecord?.offer_price || null
+          });
 
-        await supabase
-          .from('inventory_movements')
-          .insert({
+          movementsData.push({
             product_id: productId,
             type: 'out',
             quantity: qtyToDeduct,
@@ -656,9 +679,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             user_id: currentUser!.id,
             branch_id: currentBranch!.id
           });
-      });
+        });
 
-      await Promise.all(stockUpdatePromises);
+        // 3.2 Actualizar stock en lote (un solo upsert)
+        const { error: upsertError } = await supabase
+          .from('product_stock')
+          .upsert(upsertData, { onConflict: 'product_id,branch_id' });
+
+        if (upsertError) throw upsertError;
+
+        // 3.3 Registrar movimientos en lote (un solo insert)
+        const { error: mvError } = await supabase
+          .from('inventory_movements')
+          .insert(movementsData);
+
+        if (mvError) throw mvError;
+      }
 
       // --- 4. Actualizar estado local ---
       const newSale: Sale = {
@@ -741,51 +777,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Los combos padre (isCombo=true) no restauran inventario
       }
 
-      // Aplicar restauraciones en paralelo
-      const restorePromises = Object.entries(stockRestorations).map(async ([productId, qtyToRestore]) => {
-        try {
-          const { data: currentStockData, error: stockFetchError } = await supabase
-            .from('product_stock')
-            .select('quantity, price, offer_price')
-            .eq('product_id', productId)
-            .eq('branch_id', currentBranch.id)
-            .maybeSingle();
+      const productIds = Object.keys(stockRestorations);
+      if (productIds.length > 0) {
+        // 2.1 Obtener stock actual de todos los productos en una sola consulta
+        const { data: currentStocksData, error: stockFetchError } = await supabase
+          .from('product_stock')
+          .select('product_id, quantity, price, offer_price')
+          .in('product_id', productIds)
+          .eq('branch_id', currentBranch.id);
 
-          if (stockFetchError) throw stockFetchError;
+        if (stockFetchError) throw stockFetchError;
 
-          const currentStock = currentStockData?.quantity || 0;
+        // Crear mapa para búsquedas rápidas
+        const stocksMap = (currentStocksData || []).reduce((acc: Record<string, any>, item: any) => {
+          acc[item.product_id] = item;
+          return acc;
+        }, {});
 
-          const { error: upsertError } = await supabase
-            .from('product_stock')
-            .upsert({
-              product_id: productId,
-              branch_id: currentBranch.id,
-              quantity: currentStock + qtyToRestore,
-              price: currentStockData?.price,
-              offer_price: currentStockData?.offer_price,
-              is_visible: true
-            }, { onConflict: 'product_id,branch_id' });
+        // Preparar arreglos para operaciones en lote
+        const upsertData: any[] = [];
+        const movementsData: any[] = [];
 
-          if (upsertError) throw upsertError;
+        Object.entries(stockRestorations).forEach(([productId, qtyToRestore]) => {
+          const stockRecord = stocksMap[productId];
+          const currentStock = stockRecord?.quantity || 0;
+          const newStock = currentStock + qtyToRestore;
 
-          const { error: mvError } = await supabase
-            .from('inventory_movements')
-            .insert({
-              product_id: productId,
-              type: 'in',
-              quantity: qtyToRestore,
-              reason: `Anulación Venta #${saleId}: ${reason}`,
-              user_id: currentUser.id,
-              branch_id: currentBranch.id
-            });
-            
-          if (mvError) throw mvError;
-        } catch (err) {
-          console.error(`Error restoring stock for product ${productId}:`, err);
-        }
-      });
+          upsertData.push({
+            product_id: productId,
+            branch_id: currentBranch.id,
+            quantity: newStock,
+            price: stockRecord?.price || null,
+            offer_price: stockRecord?.offer_price || null,
+            is_visible: true
+          });
 
-      await Promise.all(restorePromises);
+          movementsData.push({
+            product_id: productId,
+            type: 'in',
+            quantity: qtyToRestore,
+            reason: `Anulación Venta #${saleId}: ${reason}`,
+            user_id: currentUser.id,
+            branch_id: currentBranch.id
+          });
+        });
+
+        // 2.2 Actualizar stock en lote (un solo upsert)
+        const { error: upsertError } = await supabase
+          .from('product_stock')
+          .upsert(upsertData, { onConflict: 'product_id,branch_id' });
+
+        if (upsertError) throw upsertError;
+
+        // 2.3 Registrar movimientos en lote (un solo insert)
+        const { error: mvError } = await supabase
+          .from('inventory_movements')
+          .insert(movementsData);
+
+        if (mvError) throw mvError;
+      }
 
       // 3. Actualizar estado local
       setSales(prev => prev.map(s =>
@@ -1177,12 +1227,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stockRecord[bid] = bData.stock;
       });
 
+      const finalBranchData: Record<string, { price: number; offerPrice?: number; stock: number; isVisible: boolean }> = {};
+      Object.entries(product.branchData).forEach(([bid, bData]) => {
+        finalBranchData[bid] = {
+          price: bData.price,
+          offerPrice: bData.offerPrice,
+          stock: bData.stock,
+          isVisible: (bData as any).isVisible !== false
+        };
+      });
+
       const newProduct: Product = {
         ...product,
         id: data.id,
         price: currentData.price,
         offerPrice: currentData.offerPrice,
-        stock: stockRecord
+        stock: stockRecord,
+        branchData: finalBranchData
       };
 
       setProducts(prev => [newProduct, ...prev]);
