@@ -91,6 +91,7 @@ export const POS = () => {
   const [lastSale, setLastSale] = useState<any>(null);
   const [customerName, setCustomerName] = useState('');
   const [isEmployeeMode, setIsEmployeeMode] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleProductClick = (product: any) => {
     if (product.saleType === 'weight') {
@@ -210,25 +211,24 @@ export const POS = () => {
   };
 
   const handleProcessSale = async () => {
-    if (!selectedPaymentMethod) return;
+    if (!selectedPaymentMethod || isProcessing) return;
+    setIsProcessing(true);
     try {
       const sale = await processSale(selectedPaymentMethod, customerName, isEmployeeMode);
       setSelectedPaymentMethod(null);
-      setCustomerName(''); // Limpiar nombre después de venta
-      setIsEmployeeMode(false); // Limpiar modo empleado
+      setCustomerName('');
+      setIsEmployeeMode(false);
       
       if (sale) {
         setLastSale(sale);
         setShowSuccessModal(true);
         
-        // Solo imprimir automáticamente si es el Local 2 y tiene la opción activa
         if (autoPrint && currentBranch?.name?.toLowerCase().includes('2')) {
           handlePrintTicket(sale);
         }
       }
-    } catch (error) {
-      toast.error('Error al procesar la venta');
-      console.error(error);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -709,12 +709,12 @@ export const POS = () => {
             </div>
 
             <button
-              disabled={cart.length === 0 || !selectedPaymentMethod || (isEmployeeMode && !customerName.trim())}
+              disabled={cart.length === 0 || !selectedPaymentMethod || (isEmployeeMode && !customerName.trim()) || isProcessing}
               onClick={handleProcessSale}
               className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-black text-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md active:scale-[0.99]"
             >
               <CreditCard className="w-5 h-5" />
-              <span className="uppercase tracking-tighter">PAGAR</span>
+              <span className="uppercase tracking-tighter">{isProcessing ? 'PROCESANDO...' : 'PAGAR'}</span>
             </button>
           </div>
         </div>

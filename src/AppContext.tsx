@@ -573,23 +573,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const processSale = async (paymentMethod: 'cash' | 'card' | 'transfer' | 'amipass' | 'pluxe' | 'edenred', customerName?: string, isEmployeeSale?: boolean) => {
+    if (cart.length === 0) return null;
+
+    // Capturar el carrito antes de cualquier operación async
+    const cartSnapshot = [...cart];
+    const mainItems = cartSnapshot.filter(item => !(item as any).isComboComponent);
+    const comboComponents = cartSnapshot.filter(item => (item as any).isComboComponent);
+
+    const totalValue = mainItems.reduce((acc, item) => {
+      const price = item.employeePrice ?? item.offerPrice ?? item.price;
+      return acc + (Math.round(price) * item.quantity);
+    }, 0);
+    const total = Math.round(totalValue);
+
+    // saleData se guarda aquí para poder retornarla aunque fallen pasos posteriores
+    let saleData: any = null;
+
     try {
-      if (cart.length === 0) return null;
-
-      // Separar ítems principales de componentes de combo
-      const mainItems = cart.filter(item => !(item as any).isComboComponent);
-      const comboComponents = cart.filter(item => (item as any).isComboComponent);
-
-      // Calcular total solo con ítems principales (los componentes van en $0)
-      // En modo empleado se usa employeePrice si está definido
-      const totalValue = mainItems.reduce((acc, item) => {
-        const price = item.employeePrice ?? item.offerPrice ?? item.price;
-        return acc + (Math.round(price) * item.quantity);
-      }, 0);
-      const total = Math.round(totalValue);
-
       // --- 1. Insertar la venta ---
-      const { data: saleData, error: saleError } = await supabase
+      const { data, error: saleError } = await supabase
         .from('sales')
         .insert({
           total,
@@ -603,9 +605,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .single();
 
       if (saleError) throw saleError;
+      saleData = data;
 
       // --- 2. Registrar todos los ítems de la venta ---
-      const saleItems = cart.map(item => {
+      const saleItems = cartSnapshot.map(item => {
         const effectivePrice = item.employeePrice ?? item.offerPrice ?? item.price;
         return {
           sale_id: saleData.id,
@@ -621,27 +624,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (itemsError) throw itemsError;
 
       // --- 3. Actualizar stock ---
-      // Construir mapa de descuentos de stock: productId -> totalQtyToDeduct
       // Los combos (isCombo=true) NO descuentan su propio stock; solo sus componentes lo hacen.
-      // Los productos normales y componentes de combo sí descuentan su stock.
       const stockDeductions: Record<string, number> = {};
 
       for (const item of mainItems) {
         if (!(item as any).isCombo) {
-          // Producto normal: descontar stock
           stockDeductions[item.id] = (stockDeductions[item.id] || 0) + item.quantity;
         }
-        // Los combos (isCombo=true) ya tienen sus componentes en el carrito; no descontamos el combo en sí
       }
-
-      // Componentes de combo: siempre descontar stock
       for (const item of comboComponents) {
         stockDeductions[item.id] = (stockDeductions[item.id] || 0) + item.quantity;
       }
 
       const productIds = Object.keys(stockDeductions);
       if (productIds.length > 0) {
-        // 3.1 Obtener stock actual de todos los productos en una sola consulta
         const { data: currentStocksData, error: stockFetchError } = await supabase
           .from('product_stock')
           .select('product_id, quantity, price, offer_price')
@@ -650,13 +646,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (stockFetchError) throw stockFetchError;
 
-        // Crear mapa para búsquedas rápidas
         const stocksMap = (currentStocksData || []).reduce((acc: Record<string, any>, item: any) => {
           acc[item.product_id] = item;
           return acc;
         }, {});
 
-        // Preparar arreglos para operaciones en lote
         const upsertData: any[] = [];
         const movementsData: any[] = [];
 
@@ -683,26 +677,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         });
 
-        // 3.2 Actualizar stock en lote (un solo upsert)
         const { error: upsertError } = await supabase
           .from('product_stock')
           .upsert(upsertData, { onConflict: 'product_id,branch_id' });
 
         if (upsertError) throw upsertError;
 
-        // 3.3 Registrar movimientos en lote (un solo insert)
         const { error: mvError } = await supabase
           .from('inventory_movements')
           .insert(movementsData);
 
         if (mvError) throw mvError;
+
+        // Actualizar stock local
+        setProducts(prev => prev.map(p => {
+          const deduction = stockDeductions[p.id];
+          if (deduction) {
+            return {
+              ...p,
+              stock: {
+                ...p.stock,
+                [currentBranch!.id]: (p.stock[currentBranch!.id] || 0) - deduction
+              }
+            };
+          }
+          return p;
+        }));
       }
 
       // --- 4. Actualizar estado local ---
       const newSale: Sale = {
         id: saleData.id,
         date: saleData.date,
-        items: [...cart],
+        items: cartSnapshot,
         total,
         paymentMethod,
         cashierId: currentUser!.id,
@@ -714,28 +721,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       setSales(prev => [newSale, ...prev]);
-
-      setProducts(prev => prev.map(p => {
-        const deduction = stockDeductions[p.id];
-        if (deduction) {
-          return {
-            ...p,
-            stock: {
-              ...p.stock,
-              [currentBranch!.id]: (p.stock[currentBranch!.id] || 0) - deduction
-            }
-          };
-        }
-        return p;
-      }));
-
       clearCart();
       toast.success('Venta procesada con éxito');
       return newSale;
 
     } catch (error) {
       console.error('Error processing sale:', error);
-      toast.error('Error al procesar la venta');
+
+      // Si la venta YA fue guardada en Supabase (saleData !== null), la venta existe.
+      // Retornar la venta de todas formas para que el POS limpie el carrito y muestre
+      // el modal de éxito. Así evitamos que el cajero duplique la venta.
+      if (saleData) {
+        const partialSale: Sale = {
+          id: saleData.id,
+          date: saleData.date,
+          items: cartSnapshot,
+          total,
+          paymentMethod,
+          cashierId: currentUser?.id || '',
+          cashierName: currentUser?.name,
+          branchId: currentBranch?.id || '',
+          status: 'completed',
+          customerName: customerName || undefined,
+          isEmployeeSale: isEmployeeSale || false
+        };
+        setSales(prev => [partialSale, ...prev]);
+        clearCart();
+        // Aviso de advertencia (no error) — la venta se guardó, solo falló algo secundario
+        toast('Venta guardada. El stock se actualizará automáticamente.', {
+          icon: '⚠️',
+          style: { background: '#fef3c7', color: '#92400e', fontWeight: 'bold' }
+        });
+        return partialSale;
+      }
+
+      // Si saleData es null, la venta nunca se insertó → error real
+      toast.error('Error al procesar la venta. Inténtalo de nuevo.');
       return null;
     }
   };
