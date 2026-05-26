@@ -1558,12 +1558,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toggleDarkMode,
       refreshSales: async () => {
         if (!currentBranch) return;
-        const { data: salesData } = await supabase
+        
+        let salesQuery = supabase
           .from('sales')
-          .select('*')
+          .select(`
+            *,
+            sale_items (*)
+          `)
           .order('date', { ascending: false })
           .limit(500);
-        if (salesData) setSales(salesData.map((s: any) => ({ ...s, branchId: s.branch_id, cashierId: s.cashier_id, paymentMethod: s.payment_method, isEmployeeSale: s.is_employee_sale, customerName: s.customer_name, voidReason: s.void_reason, voidDate: s.void_date })));
+
+        if (currentUser && currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'root') {
+          salesQuery = salesQuery.eq('branch_id', currentBranch.id);
+        }
+
+        const { data: salesData, error: salesError } = await salesQuery;
+        
+        if (salesError) {
+          console.error('Error refreshing sales:', salesError);
+          return;
+        }
+
+        if (salesData) {
+          const formattedSales: Sale[] = salesData.map(s => ({
+            id: s.id,
+            date: s.date,
+            total: s.total,
+            paymentMethod: s.payment_method,
+            cashierId: s.cashier_id,
+            branchId: s.branch_id,
+            status: s.status || 'completed',
+            voidReason: s.void_reason,
+            voidDate: s.void_date,
+            customerName: s.customer_name,
+            isEmployeeSale: s.is_employee_sale || false,
+            items: s.sale_items?.map((item: any) => {
+              const product = products.find(p => p.id === item.product_id);
+              return {
+                ...product,
+                id: item.product_id || (product?.id || 'deleted'),
+                name: item.name || (product?.name || 'PRODUCTO ELIMINADO'),
+                barcode: item.barcode || (product?.barcode || 'N/A'),
+                brand: item.brand || (product?.brand || ''),
+                quantity: item.quantity || 0,
+                price: item.price || 0,
+                originalPrice: item.original_price || item.price || 0,
+                saleType: item.sale_type || (product?.saleType || 'unit'),
+                imageUrl: product?.imageUrl
+              } as CartItem;
+            }) || []
+          }));
+          setSales(formattedSales);
+        }
       },
       cleanOldRecords: async () => {
         try {
