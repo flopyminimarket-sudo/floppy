@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Building2, Palette, Database, Save, Upload, Image as ImageIcon } from 'lucide-react';
+import { Building2, Palette, Database, Save, Upload, Image as ImageIcon, Trash2, AlertTriangle, X } from 'lucide-react';
 import { useApp } from '../AppContext';
 import toast from 'react-hot-toast';
 
 export const Settings = () => {
-  const { companySettings, setCompanySettings } = useApp();
+  const { companySettings, setCompanySettings, cleanOldRecords } = useApp();
   const [activeTab, setActiveTab] = useState('general');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [generalData, setGeneralData] = useState(companySettings);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [showConfirmClean, setShowConfirmClean] = useState(false);
 
   // Sync form data when companySettings loads from Supabase
   useEffect(() => {
@@ -102,6 +104,13 @@ export const Settings = () => {
           >
             <Database className="w-5 h-5" />
             Conexión
+          </button>
+          <button
+            onClick={() => setActiveTab('maintenance')}
+            className={`flex items-center gap-3 p-4 rounded-[14px] transition-all font-bold ${activeTab === 'maintenance' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-zinc-500 hover:bg-zinc-50 border border-zinc-200'}`}
+          >
+            <Trash2 className="w-5 h-5" />
+            Mantenimiento
           </button>
         </div>
 
@@ -306,8 +315,99 @@ export const Settings = () => {
               </div>
             </div>
           )}
+
+          {activeTab === 'maintenance' && (
+            <div className="max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h2 className="text-xl font-bold text-zinc-900 mb-2">Mantenimiento del Sistema</h2>
+              <p className="text-sm text-zinc-500 mb-8">Administra la base de datos para mantener el sistema rápido y optimizado.</p>
+
+              <div className="p-6 border border-rose-200 bg-rose-50 rounded-[14px]">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-rose-100 text-rose-600 rounded-xl">
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-rose-900 mb-1">Limpiar Historial Antiguo</h3>
+                    <p className="text-sm text-rose-700 mb-4">
+                      Esta acción eliminará de forma permanente todas las <strong>ventas y movimientos de inventario que tengan más de 31 días de antigüedad</strong>. 
+                      Esto ayudará a liberar espacio y mejorar la velocidad de carga de la base de datos.<br/><br/>
+                      <strong>Nota importante:</strong> El stock actual de los productos NO se verá afectado por esta limpieza.
+                    </p>
+                    <button
+                      onClick={() => setShowConfirmClean(true)}
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-colors shadow-sm flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Purgar datos &gt; 31 días
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Confirm Cleanup Modal */}
+      {showConfirmClean && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm">
+          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-zinc-100 flex justify-between items-center bg-rose-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-black text-rose-900 uppercase tracking-tight">Confirmar Limpieza</h3>
+              </div>
+              <button 
+                onClick={() => setShowConfirmClean(false)}
+                className="text-zinc-400 hover:text-zinc-600 p-2 rounded-lg hover:bg-zinc-100 transition-colors"
+                disabled={isCleaning}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-zinc-600 font-medium leading-relaxed mb-6">
+                Estás a punto de borrar permanentemente los registros de ventas y movimientos más antiguos a 31 días.
+                <br /><br />
+                <span className="font-bold text-rose-600">Esta acción no se puede deshacer.</span> ¿Estás completamente seguro de continuar?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmClean(false)}
+                  className="flex-1 px-4 py-3 bg-zinc-100 text-zinc-700 font-bold rounded-xl hover:bg-zinc-200 transition-colors"
+                  disabled={isCleaning}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    setIsCleaning(true);
+                    try {
+                      await cleanOldRecords();
+                      setShowConfirmClean(false);
+                    } finally {
+                      setIsCleaning(false);
+                    }
+                  }}
+                  disabled={isCleaning}
+                  className="flex-1 px-4 py-3 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors disabled:opacity-50 flex justify-center items-center gap-2 shadow-lg shadow-rose-200"
+                >
+                  {isCleaning ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Limpiando...
+                    </>
+                  ) : (
+                    'Sí, purgar datos'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

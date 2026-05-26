@@ -52,6 +52,7 @@ interface AppContextType {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   refreshSales: () => Promise<void>;
+  cleanOldRecords: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1563,6 +1564,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .order('date', { ascending: false })
           .limit(500);
         if (salesData) setSales(salesData.map((s: any) => ({ ...s, branchId: s.branch_id, cashierId: s.cashier_id, paymentMethod: s.payment_method, isEmployeeSale: s.is_employee_sale, customerName: s.customer_name, voidReason: s.void_reason, voidDate: s.void_date })));
+      },
+      cleanOldRecords: async () => {
+        try {
+          const thirtyOneDaysAgo = new Date();
+          thirtyOneDaysAgo.setDate(thirtyOneDaysAgo.getDate() - 31);
+          const limitDate = thirtyOneDaysAgo.toISOString();
+
+          const { error: salesError } = await supabase
+            .from('sales')
+            .delete()
+            .lt('date', limitDate);
+            
+          if (salesError) throw salesError;
+
+          const { error: movError } = await supabase
+            .from('inventory_movements')
+            .delete()
+            .lt('date', limitDate);
+            
+          if (movError) throw movError;
+          
+          toast.success('Registros antiguos eliminados correctamente');
+        } catch (error) {
+          console.error('Error cleaning old records:', error);
+          toast.error('Error al limpiar registros antiguos');
+          throw error;
+        }
       }
     }}>
       {children}
