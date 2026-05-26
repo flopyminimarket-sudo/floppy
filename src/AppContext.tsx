@@ -51,6 +51,7 @@ interface AppContextType {
   isConfigured: boolean;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
+  refreshSales: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1553,7 +1554,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isLoading,
       isConfigured,
       isDarkMode,
-      toggleDarkMode
+      toggleDarkMode,
+      refreshSales: async () => {
+        if (!currentBranch) return;
+        const { data: salesData } = await supabase
+          .from('sales')
+          .select('*')
+          .order('date', { ascending: false })
+          .limit(500);
+        if (salesData) setSales(salesData.map((s: any) => ({ ...s, branchId: s.branch_id, cashierId: s.cashier_id, paymentMethod: s.payment_method, isEmployeeSale: s.is_employee_sale, customerName: s.customer_name, voidReason: s.void_reason, voidDate: s.void_date })));
+      }
     }}>
       {children}
     </AppContext.Provider>

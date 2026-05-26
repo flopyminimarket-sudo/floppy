@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useApp } from '../AppContext';
 import { formatCurrency, cn } from '../lib/utils';
-import { Receipt, Calendar, Clock, MapPin, User, CreditCard, Banknote, Smartphone, Package, Search, X, ChevronRight, Printer, Download, Filter, AlertCircle, Trash2 } from 'lucide-react';
+import { Receipt, Calendar, Clock, MapPin, User, CreditCard, Banknote, Smartphone, Package, Search, X, ChevronRight, Printer, Download, Filter, AlertCircle, Trash2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sale } from '../types';
 import { PrintTicket } from './PrintTicket';
@@ -10,7 +10,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const Tickets = () => {
-  const { sales, branches, users, voidSale, companySettings, currentBranch, currentUser } = useApp();
+  const { sales, branches, users, voidSale, companySettings, currentBranch, currentUser, refreshSales } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
@@ -22,6 +22,22 @@ export const Tickets = () => {
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [isVoiding, setIsVoiding] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshSales();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshSales]);
+
+  // Auto-refresh al abrir la vista de tickets
+  useEffect(() => {
+    handleRefresh();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const exportToPDF = () => {
     const doc = new jsPDF();
@@ -390,6 +406,15 @@ export const Tickets = () => {
               <p className="text-zinc-500 font-medium mt-1">Historial completo de ventas y recibos</p>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                title="Actualizar tickets"
+                className="flex items-center gap-2 px-4 py-2.5 bg-white border border-zinc-200 text-zinc-700 rounded-xl font-bold hover:bg-zinc-50 transition-colors shadow-sm disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-500' : 'text-zinc-500'}`} />
+                {isRefreshing ? 'Actualizando...' : 'Actualizar'}
+              </button>
               {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'root') && (
                 <button 
                   onClick={exportCategorySummaryToPDF}
@@ -759,11 +784,21 @@ export const Tickets = () => {
                         <p className="text-sm text-zinc-500">{item?.brand || ''} {item?.barcode ? `• ${item.barcode}` : ''}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-sm text-zinc-500 mb-0.5">
-                          {item?.quantity || 0} {item?.saleType === 'weight' ? 'kg' : 'u'} x {formatCurrency(item?.offerPrice || item?.price || 0)}
+                        {selectedTicket.isEmployeeSale && item.originalPrice && item.originalPrice > item.price && (
+                          <p className="text-[10px] text-zinc-400 line-through font-medium leading-none mb-1">
+                            ORIG: {formatCurrency(item.originalPrice)}
+                          </p>
+                        )}
+                        <p className={cn(
+                          "text-sm mb-0.5",
+                          selectedTicket.isEmployeeSale && item.originalPrice && item.originalPrice > item.price 
+                            ? "text-blue-600 dark:text-blue-400 font-black" 
+                            : "text-zinc-500 font-medium"
+                        )}>
+                          {item?.quantity || 0} {item?.saleType === 'weight' ? 'kg' : 'u'} x {formatCurrency(item?.price || 0)}
                         </p>
-                        <p className="font-bold text-zinc-900">
-                          {formatCurrency(Math.round((item?.offerPrice || item?.price || 0) * (item?.quantity || 0)))}
+                        <p className="font-bold text-zinc-900 dark:text-zinc-100">
+                          {formatCurrency(Math.round((item?.price || 0) * (item?.quantity || 0)))}
                         </p>
                       </div>
                     </div>
@@ -772,7 +807,26 @@ export const Tickets = () => {
               </div>
 
               {/* Footer / Total */}
-              <div className="p-6 bg-zinc-50 border-t border-zinc-100 shrink-0 flex flex-col gap-4">
+              <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-100 dark:border-zinc-700 shrink-0 flex flex-col gap-4">
+                {selectedTicket.isEmployeeSale && selectedTicket.items && (
+                  <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800/30 mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                        <span className="text-[10px] font-black">SAVE</span>
+                      </div>
+                      <span className="text-blue-700 dark:text-blue-400 font-bold text-sm">Ahorro Empleado Total:</span>
+                    </div>
+                    <span className="text-blue-800 dark:text-blue-300 font-black text-lg">
+                      {formatCurrency(
+                        selectedTicket.items.reduce((acc, item) => {
+                          const original = item.originalPrice || item.price || 0;
+                          const paid = item.price || 0;
+                          return acc + (Math.max(0, original - paid) * (item.quantity || 0));
+                        }, 0)
+                      )}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center w-full">
                   <div className="text-zinc-500 font-medium">
                     Total de artículos: <span className="font-bold text-zinc-900">{selectedTicket.items ? selectedTicket.items.reduce((acc, item) => acc + (item?.quantity || 0), 0) : 0}</span>
