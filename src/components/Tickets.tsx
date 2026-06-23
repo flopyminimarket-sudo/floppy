@@ -27,17 +27,34 @@ export const Tickets = () => {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await refreshSales();
+      await refreshSales({
+        startDate: filterDate,
+        endDate: filterDateEnd,
+        branchId: filterBranchId,
+        cashierId: filterCashierId,
+        paymentMethod: filterPaymentMethod,
+        searchTerm: searchTerm
+      });
     } finally {
       setIsRefreshing(false);
     }
-  }, [refreshSales]);
+  }, [refreshSales, filterDate, filterDateEnd, filterBranchId, filterCashierId, filterPaymentMethod, searchTerm]);
 
-  // Auto-refresh al abrir la vista de tickets
+  // Actualizar ventas cuando cambian los filtros
   useEffect(() => {
-    handleRefresh();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const delayDebounce = setTimeout(() => {
+      refreshSales({
+        startDate: filterDate,
+        endDate: filterDateEnd,
+        branchId: filterBranchId,
+        cashierId: filterCashierId,
+        paymentMethod: filterPaymentMethod,
+        searchTerm: searchTerm
+      });
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [filterDate, filterDateEnd, filterBranchId, filterCashierId, filterPaymentMethod, searchTerm, refreshSales]);
 
   const exportToPDF = () => {
     const doc = new jsPDF();

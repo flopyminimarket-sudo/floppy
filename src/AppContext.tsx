@@ -50,8 +50,14 @@ interface AppContextType {
   isLoading: boolean;
   isConfigured: boolean;
   isDarkMode: boolean;
-  toggleDarkMode: () => void;
-  refreshSales: () => Promise<void>;
+  refreshSales: (filters?: {
+    startDate?: string;
+    endDate?: string;
+    branchId?: string;
+    cashierId?: string;
+    paymentMethod?: string;
+    searchTerm?: string;
+  }) => Promise<void>;
   cleanOldRecords: () => Promise<void>;
 }
 
@@ -1577,7 +1583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isConfigured,
       isDarkMode,
       toggleDarkMode,
-      refreshSales: async () => {
+      refreshSales: async (filters) => {
         if (!currentBranch) return;
         
         let salesQuery = supabase
@@ -1585,13 +1591,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .select(`
             *,
             sale_items (*)
-          `)
-          .order('date', { ascending: false })
-          .limit(500);
+          `);
 
-        if (currentUser && currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'root') {
+        if (filters?.startDate) {
+          salesQuery = salesQuery.gte('date', `${filters.startDate}T00:00:00.000Z`);
+        } else {
+          // Default to 31 days ago (retention limit)
+          const thirtyOneDaysAgo = new Date();
+          thirtyOneDaysAgo.setDate(thirtyOneDaysAgo.getDate() - 31);
+          salesQuery = salesQuery.gte('date', thirtyOneDaysAgo.toISOString());
+        }
+
+        if (filters?.endDate) {
+          salesQuery = salesQuery.lte('date', `${filters.endDate}T23:59:59.999Z`);
+        }
+
+        if (filters?.branchId) {
+          salesQuery = salesQuery.eq('branch_id', filters.branchId);
+        } else if (currentUser && currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'root') {
           salesQuery = salesQuery.eq('branch_id', currentBranch.id);
         }
+
+        if (filters?.cashierId) {
+          salesQuery = salesQuery.eq('cashier_id', filters.cashierId);
+        }
+
+        if (filters?.paymentMethod) {
+          salesQuery = salesQuery.eq('payment_method', filters.paymentMethod);
+        }
+
+        if (filters?.searchTerm) {
+          salesQuery = salesQuery.ilike('id', `%${filters.searchTerm}%`);
+        }
+
+        salesQuery = salesQuery.order('date', { ascending: false }).limit(1000);
 
         const { data: salesData, error: salesError } = await salesQuery;
         

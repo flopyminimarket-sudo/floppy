@@ -87,6 +87,7 @@ export interface CartItem extends Product {
   quantity: number;
   notes?: string;
   employeePrice?: number; // Custom price set in employee sale mode
+  originalPrice?: number; // Price before employee discount
 }
 
 export interface Sale {
