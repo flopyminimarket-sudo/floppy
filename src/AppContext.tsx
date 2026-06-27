@@ -1593,8 +1593,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             sale_items (*)
           `);
 
+        // Calcular el offset de zona horaria local para no usar UTC puro.
+        // Ejemplo: UTC-4 → offset = '+' pero getTimezoneOffset devuelve 240 (positivo = atrás de UTC)
+        // Necesitamos el signo invertido y formato HH:MM para el ISO string.
+        const tzOffsetMinutes = new Date().getTimezoneOffset(); // e.g. 240 para UTC-4
+        const tzSign = tzOffsetMinutes <= 0 ? '+' : '-';
+        const tzAbs = Math.abs(tzOffsetMinutes);
+        const tzHH = String(Math.floor(tzAbs / 60)).padStart(2, '0');
+        const tzMM = String(tzAbs % 60).padStart(2, '0');
+        const tzSuffix = `${tzSign}${tzHH}:${tzMM}`; // e.g. '-04:00'
+
         if (filters?.startDate) {
-          salesQuery = salesQuery.gte('date', `${filters.startDate}T00:00:00.000Z`);
+          salesQuery = salesQuery.gte('date', `${filters.startDate}T00:00:00.000${tzSuffix}`);
         } else {
           // Default to 31 days ago (retention limit)
           const thirtyOneDaysAgo = new Date();
@@ -1603,7 +1613,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         if (filters?.endDate) {
-          salesQuery = salesQuery.lte('date', `${filters.endDate}T23:59:59.999Z`);
+          salesQuery = salesQuery.lte('date', `${filters.endDate}T23:59:59.999${tzSuffix}`);
         }
 
         if (filters?.branchId) {
