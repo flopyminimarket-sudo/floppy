@@ -63,10 +63,53 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// --- Session persistence helpers (sessionStorage — expires when tab/browser closes) ---
+const SESSION_USER_KEY = 'session_user';
+const SESSION_BRANCH_KEY = 'session_branch';
+
+function saveSessionUser(user: any) {
+  try {
+    if (user) {
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+    } else {
+      sessionStorage.removeItem(SESSION_USER_KEY);
+    }
+  } catch {}
+}
+
+function saveSessionBranch(branch: any) {
+  try {
+    if (branch) {
+      sessionStorage.setItem(SESSION_BRANCH_KEY, JSON.stringify(branch));
+    } else {
+      sessionStorage.removeItem(SESSION_BRANCH_KEY);
+    }
+  } catch {}
+}
+
+function loadSession(): { user: any; branch: any } {
+  try {
+    const user = sessionStorage.getItem(SESSION_USER_KEY);
+    const branch = sessionStorage.getItem(SESSION_BRANCH_KEY);
+    return {
+      user: user ? JSON.parse(user) : null,
+      branch: branch ? JSON.parse(branch) : null,
+    };
+  } catch {
+    return { user: null, branch: null };
+  }
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_USER_KEY);
+  sessionStorage.removeItem(SESSION_BRANCH_KEY);
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const savedSession = loadSession();
+  const [currentUser, setCurrentUserState] = useState<User | null>(savedSession.user);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [currentBranch, setCurrentBranch] = useState<Branch | null>(null);
+  const [currentBranch, setCurrentBranchState] = useState<Branch | null>(savedSession.branch);
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -145,7 +188,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { data: branchesData, error: branchesError } = await supabase.from('branches').select('*');
       if (branchesError) throw branchesError;
-      setBranches(branchesData || []);
+      const loadedBranches = branchesData || [];
+      setBranches(loadedBranches);
+
+      // Si el usuario ya está logueado pero por algún bug previo la sucursal guardada quedó en null,
+      // seleccionamos automáticamente la primera sucursal permitida para evitar que no cargue productos.
+      if (currentUser && !currentBranch && loadedBranches.length > 0) {
+        const userBranchIds = currentUser.branchIds || [];
+        const canAccessAll = (currentUser.role === 'admin' || currentUser.role === 'root' || currentUser.role === 'superadmin') && (userBranchIds.length === 0 || userBranchIds.includes('all'));
+        const allowedBranch = loadedBranches.find(b => canAccessAll || userBranchIds.includes(b.id));
+        if (allowedBranch) {
+          setCurrentBranchState(allowedBranch);
+          saveSessionBranch(allowedBranch);
+        }
+      }
       
       const { data: suppliersData } = await supabase.from('suppliers').select('*');
       if (suppliersData) setSuppliers(suppliersData);
@@ -153,7 +209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { data: categoriesData } = await supabase.from('categories').select('*');
       if (categoriesData) setCategories(categoriesData);
 
-      const { data: usersData } = await supabase.from('users').select('*');
+      const { data: usersData } = await supabase.from('users').select('id, name, email, role, branch_ids, branch_id, avatar');
       if (usersData) {
         setUsers(usersData.map(u => ({
           id: u.id,
@@ -896,7 +952,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) return;
     
     try {
-      console.log(`Transferring ${quantity} of product ${productId} from ${fromBranchId} to ${toBranchId}`);
+      if (import.meta.env.DEV) {
+        console.log(`Transferring ${quantity} of product ${productId} from ${fromBranchId} to ${toBranchId}`);
+      }
 
       // Get current stocks from DB to ensure accuracy
       const { data: fromStockData, error: fromError } = await supabase
@@ -1565,9 +1623,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      currentUser, setCurrentUser,
+      currentUser,
+      setCurrentUser: (user) => {
+        setCurrentUserState(user);
+        saveSessionUser(user);
+        if (!user) {
+          clearSession();
+          setCurrentBranchState(null);
+        }
+      },
       branches, setBranches,
-      currentBranch, setCurrentBranch,
+      currentBranch,
+      setCurrentBranch: (branch) => {
+        setCurrentBranchState(branch);
+        saveSessionBranch(branch);
+      },
       products, setProducts,
       sales, setSales,
       suppliers, setSuppliers,

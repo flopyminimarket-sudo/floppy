@@ -207,13 +207,15 @@ export const MainLayout = () => {
             <div className="flex items-center gap-4">
               <div className="relative hidden sm:block">
                 <select
-                  value={currentBranch.id}
+                  value={currentBranch?.id || ''}
                   onChange={(e) => {
                     const branch = branches.find(b => b.id === e.target.value);
                     if (branch) setCurrentBranch(branch);
                   }}
                   className="appearance-none bg-blue-50 border-none text-blue-700 py-2.5 pl-4 pr-10 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+                  disabled={!currentBranch}
                 >
+                  {!currentBranch && <option value="">Selecciona sucursal</option>}
                   {branches
                     .filter(b => {
                       if (!currentUser) return false;

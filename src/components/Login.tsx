@@ -1,8 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../AppContext';
 import { supabase } from '../lib/supabase';
-import { LogIn, KeyRound, Mail, Building2, Eye, EyeOff } from 'lucide-react';
+import { LogIn, KeyRound, Mail, Building2, Eye, EyeOff, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+import bcrypt from 'bcryptjs';
+
+// --- Rate limiting: in-memory only (resets on page reload, no persistent lockout) ---
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 export const Login = () => {
   const { setCurrentUser, setCurrentBranch, branches, companySettings } = useApp();
@@ -11,6 +17,11 @@ export const Login = () => {
   const [branchId, setBranchId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [lockoutRemaining, setLockoutRemaining] = useState(0);
+
+  // In-memory counters — reset automatically when page reloads
+  const attemptCount = useRef(0);
+  const lockedUntil = useRef<number | null>(null);
 
   useEffect(() => {
     if (branches.length > 0 && !branchId) {
@@ -18,8 +29,33 @@ export const Login = () => {
     }
   }, [branches, branchId]);
 
+  // Live countdown while locked
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (lockedUntil.current) {
+        const remaining = Math.max(0, lockedUntil.current - Date.now());
+        setLockoutRemaining(remaining);
+        if (remaining === 0) {
+          lockedUntil.current = null;
+          attemptCount.current = 0;
+        }
+      } else {
+        setLockoutRemaining(0);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // --- Check lockout ---
+    if (lockedUntil.current && Date.now() < lockedUntil.current) {
+      const minsLeft = Math.ceil((lockedUntil.current - Date.now()) / 60000);
+      toast.error(`Demasiados intentos. Espera ${minsLeft} minuto(s).`);
+      return;
+    }
+
     if (!branchId) {
       toast.error('Por favor, selecciona una sucursal');
       return;
@@ -27,23 +63,54 @@ export const Login = () => {
 
     setIsLoading(true);
     try {
-      // Find user in Supabase
+      // Query the user by email first, as we cannot compare hashed password directly in the eq filter
       const { data: user, error } = await supabase
         .from('users')
         .select('*')
         .eq('email', email)
-        .eq('password', password)
         .single();
-      
-      if (error || !user) {
-        toast.error('Credenciales incorrectas');
+
+      let isPasswordCorrect = false;
+      if (user && !error) {
+        // Hashed passwords start with $2a$ or similar
+        if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$') || user.password.startsWith('$2y$')) {
+          isPasswordCorrect = await bcrypt.compare(password, user.password);
+        } else {
+          // Fallback for plaintext passwords if any are left
+          isPasswordCorrect = user.password === password;
+        }
+      }
+
+      if (error || !user || !isPasswordCorrect) {
+        // Only increment counter on wrong credentials (PGRST116 = no rows found, or bcrypt compare failed)
+        const isWrongCredentials = !error || error.code === 'PGRST116' || !isPasswordCorrect;
+        if (isWrongCredentials) {
+          attemptCount.current += 1;
+          if (attemptCount.current >= MAX_ATTEMPTS) {
+            lockedUntil.current = Date.now() + LOCKOUT_DURATION_MS;
+            setLockoutRemaining(LOCKOUT_DURATION_MS);
+            toast.error(`Demasiados intentos. Cuenta bloqueada por 15 minutos.`);
+          } else {
+            toast.error(`Credenciales incorrectas. Intento ${attemptCount.current}/${MAX_ATTEMPTS}.`);
+          }
+        } else {
+          // Real DB/network error — don't penalize the user
+          console.error('Login DB error:', error);
+          toast.error('Error de conexión con el servidor. Intenta de nuevo.');
+        }
         return;
       }
 
-      // Check branch access (Admin and Root can access all, others only their assigned branches)
+      // Success — reset counter
+      attemptCount.current = 0;
+      lockedUntil.current = null;
+
+      // Check branch access
       const userBranchIds = user.branch_ids || (user.branch_id ? [user.branch_id] : []);
-      const canAccessAll = (user.role === 'admin' || user.role === 'root' || user.role === 'superadmin') && (userBranchIds.length === 0 || userBranchIds.includes('all'));
-      
+      const canAccessAll =
+        (user.role === 'admin' || user.role === 'root' || user.role === 'superadmin') &&
+        (userBranchIds.length === 0 || userBranchIds.includes('all'));
+
       if (!canAccessAll && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
         toast.error('No tienes acceso a esta sucursal');
         return;
@@ -173,9 +240,18 @@ export const Login = () => {
               </div>
             </div>
 
+            {lockoutRemaining > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700">
+                <ShieldAlert className="w-5 h-5 shrink-0" />
+                <p className="text-sm font-medium">
+                  Bloqueado. Intenta en {Math.ceil(lockoutRemaining / 60000)} min {Math.floor((lockoutRemaining % 60000) / 1000)} seg.
+                </p>
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={isLoading || branches.length === 0}
+              disabled={isLoading || branches.length === 0 || lockoutRemaining > 0}
               className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2 mt-8"
             >
               <LogIn className="w-5 h-5" />

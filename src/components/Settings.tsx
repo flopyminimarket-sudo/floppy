@@ -1,16 +1,72 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Building2, Palette, Database, Save, Upload, Image as ImageIcon, Trash2, AlertTriangle, X } from 'lucide-react';
+import { Building2, Palette, Database, Save, Upload, Image as ImageIcon, Trash2, AlertTriangle, X, Download } from 'lucide-react';
 import { useApp } from '../AppContext';
 import toast from 'react-hot-toast';
 
 export const Settings = () => {
-  const { companySettings, setCompanySettings, cleanOldRecords } = useApp();
+  const { companySettings, setCompanySettings, cleanOldRecords, currentUser } = useApp();
   const [activeTab, setActiveTab] = useState('general');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [generalData, setGeneralData] = useState(companySettings);
   const [isCleaning, setIsCleaning] = useState(false);
   const [showConfirmClean, setShowConfirmClean] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+
+  const handleBackup = async () => {
+    if (!currentUser?.id) {
+      toast.error('Sesión de usuario no válida para realizar respaldos.');
+      return;
+    }
+    setIsBackingUp(true);
+    const toastId = toast.loading('Generando respaldo en la nube...');
+    try {
+      const response = await fetch('/api/backup', {
+        headers: {
+          'x-user-id': currentUser.id
+        }
+      });
+      if (!response.ok) {
+        let errMsg = 'Error al generar el respaldo';
+        try {
+          // Intentar parsear JSON
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch (_) {
+          try {
+            // Fallback a texto plano si no es JSON (ej: si el proxy de Vite retorna HTML)
+            const txt = await response.text();
+            if (txt && txt.length < 150) {
+              errMsg = txt;
+            } else if (response.status === 504 || response.status === 502) {
+              errMsg = 'El servidor de backups no responde (¿está corriendo node server.mjs?)';
+            }
+          } catch (_) {}
+        }
+        throw new Error(errMsg);
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `supabase_backup_${new Date().toISOString().split('T')[0]}.sql`;
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="(.+)"/);
+        if (match) filename = match[1];
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast.success('Respaldo descargado exitosamente', { id: toastId });
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'Error al generar el respaldo', { id: toastId });
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
 
   // Sync form data when companySettings loads from Supabase
   useEffect(() => {
@@ -339,6 +395,40 @@ export const Settings = () => {
                     >
                       <Trash2 className="w-4 h-4" />
                       Purgar datos &gt; 31 días
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Nueva sección para Respaldo Manual */}
+              <div className="p-6 border border-zinc-200 bg-zinc-50 rounded-[14px] mt-6">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-blue-100 text-blue-600 rounded-xl">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-zinc-900 mb-1">Respaldo Manual de Base de Datos</h3>
+                    <p className="text-sm text-zinc-600 mb-4">
+                      Genera un respaldo completo de la base de datos de Supabase que incluye la estructura (esquemas), 
+                      los datos de todas tus sucursales, relaciones, funciones internas y políticas RLS.<br/><br/>
+                      El archivo se descargará en formato SQL estándar (`.sql`) listo para ser restaurado si es necesario.
+                    </p>
+                    <button
+                      onClick={handleBackup}
+                      disabled={isBackingUp}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {isBackingUp ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Generando...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Descargar Respaldo (.sql)
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
