@@ -385,7 +385,7 @@ export const Settings = () => {
                   <div className="flex-1">
                     <h3 className="text-lg font-bold text-rose-900 mb-1">Limpiar Historial Antiguo</h3>
                     <p className="text-sm text-rose-700 mb-4">
-                      Esta acción eliminará de forma permanente todas las <strong>ventas y movimientos de inventario que tengan más de 31 días de antigüedad</strong>. 
+                      Esta acción eliminará de forma permanente todas las <strong>ventas y movimientos de inventario que tengan más de 15 días de antigüedad</strong>. 
                       Esto ayudará a liberar espacio y mejorar la velocidad de carga de la base de datos.<br/><br/>
                       <strong>Nota importante:</strong> El stock actual de los productos NO se verá afectado por esta limpieza.
                     </p>
@@ -394,7 +394,7 @@ export const Settings = () => {
                       className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-colors shadow-sm flex items-center gap-2"
                     >
                       <Trash2 className="w-4 h-4" />
-                      Purgar datos &gt; 31 días
+                      Purgar datos &gt; 15 días
                     </button>
                   </div>
                 </div>
@@ -459,7 +459,7 @@ export const Settings = () => {
             </div>
             <div className="p-6">
               <p className="text-zinc-600 font-medium leading-relaxed mb-6">
-                Estás a punto de borrar permanentemente los registros de ventas y movimientos más antiguos a 31 días.
+                Estás a punto de borrar permanentemente los registros de ventas y movimientos más antiguos a 15 días.
                 <br /><br />
                 <span className="font-bold text-rose-600">Esta acción no se puede deshacer.</span> ¿Estás completamente seguro de continuar?
               </p>

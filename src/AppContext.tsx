@@ -1676,10 +1676,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (filters?.startDate) {
           salesQuery = salesQuery.gte('date', `${filters.startDate}T00:00:00.000${tzSuffix}`);
         } else {
-          // Default to 31 days ago (retention limit)
-          const thirtyOneDaysAgo = new Date();
-          thirtyOneDaysAgo.setDate(thirtyOneDaysAgo.getDate() - 31);
-          salesQuery = salesQuery.gte('date', thirtyOneDaysAgo.toISOString());
+          // Default to 15 days ago (retention limit)
+          const fifteenDaysAgo = new Date();
+          fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+          salesQuery = salesQuery.gte('date', fifteenDaysAgo.toISOString());
         }
 
         if (filters?.endDate) {
@@ -1747,9 +1747,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
       cleanOldRecords: async () => {
         try {
-          const thirtyOneDaysAgo = new Date();
-          thirtyOneDaysAgo.setDate(thirtyOneDaysAgo.getDate() - 31);
-          const limitDate = thirtyOneDaysAgo.toISOString();
+          const fifteenDaysAgo = new Date();
+          fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+          const limitDate = fifteenDaysAgo.toISOString();
 
           const { error: salesError } = await supabase
             .from('sales')
