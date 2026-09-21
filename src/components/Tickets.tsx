@@ -1,0 +1,938 @@
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useApp } from '../AppContext';
+import { formatCurrency, cn } from '../lib/utils';
+import { Receipt, Calendar, Clock, MapPin, User, CreditCard, Banknote, Smartphone, Package, Search, X, ChevronRight, Printer, Download, Filter, AlertCircle, Trash2, RefreshCw } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Sale } from '../types';
+import { PrintTicket } from './PrintTicket';
+
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+export const Tickets = () => {
+  const { sales, branches, users, voidSale, companySettings, currentBranch, currentUser, refreshSales } = useApp();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [filterBranchId, setFilterBranchId] = useState('');
+  const [filterCashierId, setFilterCashierId] = useState('');
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState<Sale | null>(null);
+  const [initialCash, setInitialCash] = useState<number | ''>('');
+  const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [isVoiding, setIsVoiding] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshSales({
+        startDate: filterDate,
+        endDate: filterDateEnd,
+        branchId: filterBranchId,
+        cashierId: filterCashierId,
+        paymentMethod: filterPaymentMethod,
+        searchTerm: searchTerm
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshSales, filterDate, filterDateEnd, filterBranchId, filterCashierId, filterPaymentMethod, searchTerm]);
+
+  // Actualizar ventas cuando cambian los filtros
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      refreshSales({
+        startDate: filterDate,
+        endDate: filterDateEnd,
+        branchId: filterBranchId,
+        cashierId: filterCashierId,
+        paymentMethod: filterPaymentMethod,
+        searchTerm: searchTerm
+      });
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [filterDate, filterDateEnd, filterBranchId, filterCashierId, filterPaymentMethod, searchTerm, refreshSales]);
+
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    
+    // Logo y Encabezado
+    doc.setFontSize(22);
+    doc.setTextColor(37, 99, 235); // Blue-600
+    doc.text(companySettings.name, 105, 20, { align: 'center' });
+    
+    doc.setFontSize(16);
+    doc.setTextColor(24, 24, 27); // Zinc-900
+    doc.text('Resumen de Ventas', 105, 30, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setTextColor(113, 113, 122); // Zinc-500
+    doc.text(`Generado el: ${new Date().toLocaleString('es-ES')}`, 105, 37, { align: 'center' });
+    
+    // Línea divisoria
+    doc.setDrawColor(228, 228, 231); // Zinc-200
+    doc.line(14, 45, 196, 45);
+
+    // Información de filtros
+    let currentY = 55;
+    doc.setFontSize(11);
+    doc.setTextColor(63, 63, 70); // Zinc-700
+
+    // Mostrar Sucursal
+    const activeBranchName = filterBranchId 
+      ? getBranchName(filterBranchId) 
+      : (currentBranch?.name || 'Todas las Sucursales');
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Sucursal: ${activeBranchName}`, 14, currentY);
+    currentY += 7;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    
+    // Mostrar Rango de Fechas
+    if (filterDate || filterDateEnd) {
+      const desde = filterDate ? new Date(filterDate + 'T00:00:00').toLocaleDateString('es-ES') : 'Inicio';
+      const hasta = filterDateEnd ? new Date(filterDateEnd + 'T00:00:00').toLocaleDateString('es-ES') : 'Hoy';
+      doc.text(`Rango de Fechas: ${desde} - ${hasta}`, 14, currentY);
+      currentY += 7;
+    } else {
+      doc.text('Rango de Fechas: Historial Completo', 14, currentY);
+      currentY += 7;
+    }
+
+    if (filterPaymentMethod) {
+      doc.text(`Método de Pago: ${getPaymentName(filterPaymentMethod)}`, 14, currentY);
+      currentY += 7;
+    }
+
+    if (filterCashierId) {
+      doc.text(`Cajero: ${getCashierName(filterCashierId)}`, 14, currentY);
+      currentY += 7;
+    }
+
+    // Preparar datos de la tabla
+    const tableData = filteredSales.map(sale => [
+      sale.id.substring(0, 8),
+      new Date(sale.date).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      getBranchName(sale.branchId),
+      getCashierName(sale.cashierId),
+      getPaymentName(sale.paymentMethod),
+      sale.status === 'voided' ? 'ANULADO' : formatCurrency(sale.total)
+    ]);
+
+    const totalVentas = filteredSales.reduce((acc, sale) => acc + (sale.status === 'voided' ? 0 : sale.total), 0);
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['ID', 'Fecha', 'Sucursal', 'Cajero', 'Método', 'Total']],
+      body: tableData,
+      foot: [['', '', '', '', 'TOTAL VENTAS', formatCurrency(totalVentas)]],
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+      footStyles: { fillColor: [244, 244, 245], textColor: [24, 24, 27], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [250, 250, 250] },
+      margin: { top: 20 },
+    });
+
+    // Añadir Resumen del Informe al PDF
+    const finalY = (doc as any).lastAutoTable.finalY || 200;
+    let startY = finalY + 15;
+
+    // Verificar si necesitamos una nueva página
+    if (startY + 50 > 280) {
+      doc.addPage();
+      startY = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setTextColor(24, 24, 27); // Zinc-900
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN DEL INFORME', 14, startY);
+
+    doc.setFontSize(10);
+    const initialAmt = initialCash || 0;
+    
+    // Columna Izquierda
+    let leftY = startY + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('INICIAL DE CAJA:', 14, leftY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${formatCurrency(initialAmt)}`, 85, leftY, { align: 'right' });
+    
+    leftY += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(239, 68, 68); // Red-500
+    doc.text('VENTA CIGARRILLOS:', 14, leftY);
+    doc.text(`${formatCurrency(summary.cigarettesTotal)}`, 85, leftY, { align: 'right' });
+
+    leftY += 10;
+    doc.setTextColor(16, 185, 129); // Emerald-500
+    doc.text('CAJA ESPERADA (EFECTIVO):', 14, leftY);
+    doc.text(`${formatCurrency(summary.totals.cash + initialAmt)}`, 85, leftY, { align: 'right' });
+    doc.setTextColor(24, 24, 27); // Reset color
+
+    // Columna Derecha (Desglose por método)
+    let rightY = startY + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('VENTAS POR MÉTODO:', 110, rightY);
+    doc.setFont('helvetica', 'normal');
+    
+    const methods = [
+      { name: 'Efectivo', amount: summary.totals.cash },
+      { name: 'Tarjeta', amount: summary.totals.card },
+      { name: 'Transferencia', amount: summary.totals.transfer },
+      { name: 'Amipass', amount: summary.totals.amipass },
+      { name: 'Pluxe', amount: summary.totals.pluxe },
+      { name: 'Edenred', amount: summary.totals.edenred }
+    ];
+
+    methods.forEach(m => {
+      rightY += 6;
+      doc.text(`${m.name}:`, 110, rightY);
+      doc.text(`${formatCurrency(m.amount)}`, 180, rightY, { align: 'right' });
+    });
+
+    doc.save(`resumen_ventas_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  const exportCategorySummaryToPDF = () => {
+    const doc = new jsPDF();
+    
+    // Logo y Encabezado
+    doc.setFontSize(22);
+    doc.setTextColor(37, 99, 235);
+    doc.text(companySettings.name, 105, 20, { align: 'center' });
+    
+    doc.setFontSize(16);
+    doc.setTextColor(24, 24, 27);
+    doc.text('Informe de Ventas por Categoría', 105, 30, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setTextColor(113, 113, 122);
+    doc.text(`Generado el: ${new Date().toLocaleString('es-ES')}`, 105, 37, { align: 'center' });
+    
+    doc.line(14, 45, 196, 45);
+
+    let currentY = 55;
+
+    // Sucursal y Fecha
+    const activeBranchName = filterBranchId 
+      ? getBranchName(filterBranchId) 
+      : (currentBranch?.name || 'Todas las Sucursales');
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Sucursal: ${activeBranchName}`, 14, currentY);
+    currentY += 7;
+
+    const desde = filterDate ? new Date(filterDate + 'T00:00:00').toLocaleDateString('es-ES') : 'Inicio';
+    const hasta = filterDateEnd ? new Date(filterDateEnd + 'T00:00:00').toLocaleDateString('es-ES') : 'Hoy';
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Rango de Fechas: ${desde} - ${hasta}`, 14, currentY);
+    currentY += 10;
+
+    // Agrupar por categoría
+    const categoryGroups: Record<string, Record<string, { name: string, price: number, quantity: number, total: number }>> = {};
+
+    filteredSales.forEach(sale => {
+      if (sale.status === 'voided') return;
+      
+      sale.items?.forEach(item => {
+        const cat = item.category || 'Sin Categoría';
+        const prodKey = item.id;
+        
+        if (!categoryGroups[cat]) {
+          categoryGroups[cat] = {};
+        }
+        
+        if (!categoryGroups[cat][prodKey]) {
+          categoryGroups[cat][prodKey] = {
+            name: item.name,
+            price: item.offerPrice || item.price,
+            quantity: 0,
+            total: 0
+          };
+        }
+        
+        categoryGroups[cat][prodKey].quantity += item.quantity;
+        categoryGroups[cat][prodKey].total += (item.offerPrice || item.price) * item.quantity;
+      });
+    });
+
+    const categories = Object.keys(categoryGroups).sort();
+
+    if (categories.length === 0) {
+      doc.text('No hay ventas registradas en este periodo.', 14, currentY);
+    } else {
+      categories.forEach((cat) => {
+        // Título de Categoría
+        if (currentY > 260) {
+          doc.addPage();
+          currentY = 20;
+        }
+
+        const products = Object.values(categoryGroups[cat]).sort((a, b) => b.total - a.total);
+        const tableData = products.map(p => [
+          p.name,
+          formatCurrency(p.price),
+          p.quantity.toString(),
+          formatCurrency(p.total)
+        ]);
+
+        const catTotal = products.reduce((acc, p) => acc + p.total, 0);
+
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(37, 99, 235);
+        doc.text(`Categoría: ${cat.toUpperCase()}`, 14, currentY);
+        
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: [['Producto', 'Precio Unit.', 'Cant. Vendida', 'Total Venta']],
+          body: tableData,
+          foot: [['Total Categoría', '', '', formatCurrency(catTotal)]],
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [71, 85, 105], textColor: 255 },
+          footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+          margin: { left: 14, right: 14 }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      });
+    }
+
+    doc.save(`ventas_por_categoria_${activeBranchName}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  const handleVoid = async () => {
+    if (!selectedTicket || !voidReason.trim()) return;
+    
+    setIsVoiding(true);
+    try {
+      await voidSale(selectedTicket.id, voidReason);
+      setIsVoidModalOpen(false);
+      setVoidReason('');
+      setSelectedTicket(null);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsVoiding(false);
+    }
+  };
+
+  const filteredSales = sales.filter(sale => {
+    const matchesSearch = sale.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          sale.date.includes(searchTerm);
+    
+    // Lógica de rango de fechas
+    let matchesDate = true;
+    const dateObj = new Date(sale.date);
+    const saleDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`; // YYYY-MM-DD local
+    
+    if (filterDate && filterDateEnd) {
+      matchesDate = saleDate >= filterDate && saleDate <= filterDateEnd;
+    } else if (filterDate) {
+      matchesDate = saleDate >= filterDate;
+    } else if (filterDateEnd) {
+      matchesDate = saleDate <= filterDateEnd;
+    }
+
+    const matchesPayment = filterPaymentMethod ? sale.paymentMethod === filterPaymentMethod : true;
+    const matchesBranch = filterBranchId ? String(sale.branchId) === String(filterBranchId) : true;
+    const matchesCashier = filterCashierId ? String(sale.cashierId) === String(filterCashierId) : true;
+
+    return matchesSearch && matchesDate && matchesPayment && matchesBranch && matchesCashier;
+  });
+
+  const summary = useMemo(() => {
+    const totals = {
+      cash: 0,
+      card: 0,
+      amipass: 0,
+      pluxe: 0,
+      edenred: 0,
+      transfer: 0
+    };
+    let cigarettesTotal = 0;
+
+    filteredSales.forEach(sale => {
+      if (sale.status !== 'voided') {
+        const method = sale.paymentMethod as keyof typeof totals;
+        if (totals[method] !== undefined) {
+          totals[method] += sale.total;
+        }
+
+        sale.items?.forEach(item => {
+          if ((item?.category || '').toLowerCase().includes('cigarrillo')) {
+            cigarettesTotal += ((item?.price || item?.offerPrice || 0) * (item?.quantity || 1));
+          }
+        });
+      }
+    });
+
+    return { totals, cigarettesTotal };
+  }, [filteredSales]);
+
+  const getPaymentIcon = (method: string) => {
+    switch (method) {
+      case 'cash': return <Banknote className="w-4 h-4" />;
+      case 'card': return <CreditCard className="w-4 h-4" />;
+      case 'transfer': return <Smartphone className="w-4 h-4" />;
+      default: return <CreditCard className="w-4 h-4" />;
+    }
+  };
+
+  const getPaymentName = (method: string) => {
+    switch (method) {
+      case 'cash': return 'Efectivo';
+      case 'card': return 'Tarjeta';
+      case 'amipass': return 'Amipass';
+      case 'pluxe': return 'Pluxe';
+      case 'edenred': return 'Edenred';
+      case 'transfer': return 'Transferencia';
+      default: return method;
+    }
+  };
+
+  const getCashierName = (cashierId: string) => {
+    const user = users.find(u => u.id === cashierId);
+    return user ? user.name : 'Cajero Desconocido';
+  };
+
+  const getBranchName = (branchId: string) => {
+    const branch = branches.find(b => b.id === branchId);
+    return branch ? branch.name : 'Sucursal Desconocida';
+  };
+
+  return (
+    <>
+      <div className="h-full flex flex-col p-8 overflow-hidden print:hidden">
+        <div className="flex flex-col gap-6 mb-8 shrink-0">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-2xl font-black text-zinc-900 flex items-center gap-2">
+                <Receipt className="w-8 h-8 text-blue-600" />
+                Tickets Emitidos
+              </h1>
+              <p className="text-zinc-500 font-medium mt-1">Historial completo de ventas y recibos</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                title="Actualizar tickets"
+                className="flex items-center gap-2 px-4 py-2.5 bg-white border border-zinc-200 text-zinc-700 rounded-xl font-bold hover:bg-zinc-50 transition-colors shadow-sm disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-500' : 'text-zinc-500'}`} />
+                {isRefreshing ? 'Actualizando...' : 'Actualizar'}
+              </button>
+              {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'root') && (
+                <button 
+                  onClick={exportCategorySummaryToPDF}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Package className="w-5 h-5" />
+                  Informe por Categoría
+                </button>
+              )}
+              <button 
+                onClick={exportToPDF}
+                className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-bold hover:bg-zinc-800 transition-colors shadow-sm"
+              >
+                <Download className="w-5 h-5" />
+                Exportar PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3 items-center bg-white p-3 rounded-[14px] border border-zinc-200 shadow-sm shrink-0">
+            <div className="flex items-center gap-2 px-3 border-r border-zinc-200 text-zinc-400">
+              <Filter className="w-5 h-5" />
+              <span className="font-bold text-sm uppercase tracking-wider">Filtros</span>
+            </div>
+            
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Buscar por ID..."
+                className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-xl px-2">
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-black text-zinc-400 uppercase ml-1">Desde</span>
+                  <input
+                    type="date"
+                    className="bg-transparent py-2 pr-2 focus:outline-none text-zinc-700 font-medium text-sm"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                  />
+                </div>
+                <div className="w-px h-4 bg-zinc-200" />
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-black text-zinc-400 uppercase ml-1">Hasta</span>
+                  <input
+                    type="date"
+                    className="bg-transparent py-2 pr-2 focus:outline-none text-zinc-700 font-medium text-sm"
+                    value={filterDateEnd}
+                    onChange={(e) => setFilterDateEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <select
+                className="px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium appearance-none pr-10 min-w-[160px]"
+                value={filterBranchId}
+                onChange={(e) => setFilterBranchId(e.target.value)}
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+              >
+                <option value="">Todas sucursales</option>
+                {branches.map(branch => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+              
+              <select
+                className="px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium appearance-none pr-10 min-w-[160px]"
+                value={filterCashierId}
+                onChange={(e) => setFilterCashierId(e.target.value)}
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+              >
+                <option value="">Todos los cajeros</option>
+                {users.map(user => (
+                  <option key={user.id} value={user.id}>{user.name}</option>
+                ))}
+              </select>
+
+              <select
+                className="px-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-zinc-700 font-medium appearance-none pr-10"
+                value={filterPaymentMethod}
+                onChange={(e) => setFilterPaymentMethod(e.target.value)}
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+              >
+                <option value="">Todos los métodos</option>
+                <option value="cash">Efectivo</option>
+                <option value="card">Tarjeta</option>
+                <option value="amipass">Amipass</option>
+                <option value="pluxe">Pluxe</option>
+                <option value="edenred">Edenred</option>
+                <option value="transfer">Transferencia</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 bg-white border border-zinc-200 rounded-[14px] shadow-sm overflow-hidden flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto custom-scrollbar">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 text-sm">
+                <th className="p-4 font-bold">ID Ticket</th>
+                <th className="p-4 font-bold">Fecha y Hora</th>
+                <th className="p-4 font-bold">Sucursal</th>
+                <th className="p-4 font-bold">Cajero</th>
+                <th className="p-4 font-bold">Método</th>
+                <th className="p-4 font-bold text-right">Total</th>
+                <th className="p-4 font-bold text-center">Acción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {filteredSales.map(sale => {
+                const date = new Date(sale.date);
+                return (
+                  <tr key={sale.id} className={cn(
+                    "hover:bg-blue-50/50 transition-colors group cursor-pointer",
+                    sale.status === 'voided' && "bg-rose-50/30 hover:bg-rose-50/50"
+                  )} onClick={() => setSelectedTicket(sale)}>
+                    <td className="p-4">
+                      <div className="flex flex-col items-start">
+                        <span className="font-bold text-zinc-900">{sale.id}</span>
+                        {sale.status === 'voided' && (
+                          <span className="text-[10px] font-black text-rose-600 uppercase tracking-tighter mt-1 bg-rose-50 px-1.5 py-0.5 rounded">ANULADO</span>
+                        )}
+                        {sale.isEmployeeSale && (
+                          <span className="text-[10px] font-black text-amber-600 uppercase tracking-tighter mt-1 bg-amber-50 px-1.5 py-0.5 rounded">EMPLEADO</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2 text-zinc-600">
+                        <Calendar className="w-4 h-4" />
+                        <span>{date.toLocaleDateString('es-ES')}</span>
+                        <Clock className="w-4 h-4 ml-2" />
+                        <span>{date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2 text-zinc-600">
+                        <MapPin className="w-4 h-4" />
+                        <span>{getBranchName(sale.branchId)}</span>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2 text-zinc-600">
+                        <User className="w-4 h-4" />
+                        <span>{getCashierName(sale.cashierId)}</span>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2 text-zinc-600">
+                        {getPaymentIcon(sale.paymentMethod)}
+                        <span className="capitalize">{getPaymentName(sale.paymentMethod)}</span>
+                      </div>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className={cn(
+                        "font-bold",
+                        sale.status === 'voided' ? "text-zinc-400 line-through" : "text-blue-600"
+                      )}>{formatCurrency(sale.total)}</span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <button className="p-2 text-zinc-400 group-hover:text-blue-600 transition-colors rounded-lg hover:bg-blue-100">
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredSales.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-zinc-500">
+                    No se encontraron tickets que coincidan con la búsqueda.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex-none bg-white border border-zinc-200 rounded-[14px] shadow-sm overflow-hidden p-6 mt-4">
+        <h3 className="text-xl font-black text-zinc-800 uppercase tracking-tight mb-4">Resumen del Informe</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="space-y-4">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Inicial de caja</label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">$</span>
+              <input
+                type="number"
+                placeholder="0"
+                className="w-full pl-8 pr-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-zinc-800"
+                value={initialCash}
+                onChange={(e) => setInitialCash(e.target.value ? Number(e.target.value) : '')}
+              />
+            </div>
+            <p className="text-xs font-semibold text-zinc-400 leading-relaxed">Monto ingresado por el cajero al iniciar su turno el día de hoy.</p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Ventas por Método (Aprobadas)</label>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Efectivo</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.cash)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Tarjeta</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.card)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+              <span className="font-bold text-zinc-600 text-sm">Transferencia</span>
+              <span className="font-black text-zinc-800">{formatCurrency(summary.totals.transfer)}</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-black text-zinc-500 uppercase tracking-wider">Otros Métodos & Categorías</label>
+            <div className="flex justify-between items-center bg-zinc-50 p-2.5 rounded-lg border border-zinc-100 flex-wrap gap-2">
+              <div className="flex justify-between text-xs font-bold text-zinc-600 basis-full gap-2">
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Amipass: {formatCurrency(summary.totals.amipass)}</span>
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Pluxe: {formatCurrency(summary.totals.pluxe)}</span>
+                <span className="flex-1 bg-white border border-zinc-200 px-2 py-1.5 rounded text-center truncate">Edenred: {formatCurrency(summary.totals.edenred)}</span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center bg-rose-50 p-2.5 rounded-lg border border-rose-100 mt-2">
+              <span className="font-bold text-rose-700 text-sm uppercase">Venta Cigarrillos</span>
+              <span className="font-black text-rose-800">{formatCurrency(summary.cigarettesTotal)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 mt-2">
+              <span className="font-black text-emerald-800 text-sm uppercase">Caja Esperada (Efectivo)</span>
+              <span className="font-black text-emerald-900 text-lg">{formatCurrency(summary.totals.cash + (initialCash || 0))}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Ticket Details Modal */}
+      <AnimatePresence>
+        {selectedTicket && (
+          <div 
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+              onClick={() => setSelectedTicket(null)}
+            >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[14px] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-zinc-100 bg-zinc-50 flex justify-between items-start shrink-0">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
+                      <Receipt className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-black text-zinc-900">Detalle del Ticket</h2>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold text-blue-600">{selectedTicket.id}</p>
+                        {selectedTicket.status === 'voided' && (
+                          <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[10px] font-black rounded-full uppercase">Anulado</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => window.print()}
+                    className="p-2 text-zinc-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors flex items-center gap-2 font-medium"
+                  >
+                    <Printer className="w-5 h-5" />
+                    <span className="hidden sm:inline">Imprimir Copia</span>
+                  </button>
+                  <button 
+                    onClick={() => setSelectedTicket(null)}
+                    className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {/* Meta info */}
+                <div className={cn("grid gap-4 mb-8", selectedTicket.isEmployeeSale ? "grid-cols-2 md:grid-cols-5" : "grid-cols-2 md:grid-cols-4")}>
+                  <div className="bg-zinc-50 p-4 rounded-[14px] border border-zinc-100">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-1">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase">Fecha</span>
+                    </div>
+                    <p className="font-semibold text-zinc-900">
+                      {new Date(selectedTicket.date).toLocaleDateString('es-ES')}
+                    </p>
+                    <p className="text-sm text-zinc-500">
+                      {new Date(selectedTicket.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                  <div className="bg-zinc-50 p-4 rounded-[14px] border border-zinc-100">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-1">
+                      <MapPin className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase">Sucursal</span>
+                    </div>
+                    <p className="font-semibold text-zinc-900">{getBranchName(selectedTicket.branchId)}</p>
+                  </div>
+                  <div className="bg-zinc-50 p-4 rounded-[14px] border border-zinc-100">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-1">
+                      <User className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase">Cajero</span>
+                    </div>
+                    <p className="font-semibold text-zinc-900">{getCashierName(selectedTicket.cashierId)}</p>
+                  </div>
+                  <div className="bg-zinc-50 p-4 rounded-[14px] border border-zinc-100">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-1">
+                      {getPaymentIcon(selectedTicket.paymentMethod)}
+                      <span className="text-xs font-bold uppercase">Pago</span>
+                    </div>
+                    <p className="font-semibold text-zinc-900 capitalize">{getPaymentName(selectedTicket.paymentMethod)}</p>
+                  </div>
+                  {selectedTicket.isEmployeeSale && (
+                    <div className="bg-amber-50 p-4 rounded-[14px] border border-amber-200">
+                      <div className="flex items-center gap-2 text-amber-600 mb-1">
+                        <User className="w-4 h-4" />
+                        <span className="text-xs font-bold uppercase">Empleado</span>
+                      </div>
+                      <p className="font-semibold text-amber-900 uppercase">{selectedTicket.customerName || 'N/A'}</p>
+                    </div>
+                  )}
+                </div>
+
+                {selectedTicket.status === 'voided' && (
+                  <div className="mb-8 p-4 bg-rose-50 border border-rose-100 rounded-[14px] flex gap-4 items-start">
+                    <div className="p-2 bg-rose-100 text-rose-600 rounded-xl">
+                      <AlertCircle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-rose-900">Ticket Anulado</h4>
+                      <p className="text-sm text-rose-700 font-medium">Motivo: {selectedTicket.voidReason}</p>
+                      <p className="text-xs text-rose-600 mt-1">Fecha de anulación: {selectedTicket.voidDate ? new Date(selectedTicket.voidDate).toLocaleString('es-ES') : ''}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Items */}
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">Productos Comprados</h3>
+                <div className="space-y-3">
+                  {selectedTicket.items && selectedTicket.items.map((item, index) => (
+                    <div key={`${item?.id || index}-${index}`} className="flex items-center gap-4 p-4 bg-white border border-zinc-100 rounded-[14px] shadow-sm">
+                      <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
+                        {item?.imageUrl ? (
+                          <img src={item.imageUrl} alt={item?.name || 'Producto'} className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Package className="w-6 h-6 text-slate-300" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-zinc-900 truncate">{item?.name || 'Producto sin nombre'}</h4>
+                        <p className="text-sm text-zinc-500">{item?.brand || ''} {item?.barcode ? `• ${item.barcode}` : ''}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {selectedTicket.isEmployeeSale && item.originalPrice && item.originalPrice > item.price && (
+                          <p className="text-[10px] text-zinc-400 line-through font-medium leading-none mb-1">
+                            ORIG: {formatCurrency(item.originalPrice)}
+                          </p>
+                        )}
+                        <p className={cn(
+                          "text-sm mb-0.5",
+                          selectedTicket.isEmployeeSale && item.originalPrice && item.originalPrice > item.price 
+                            ? "text-blue-600 dark:text-blue-400 font-black" 
+                            : "text-zinc-500 font-medium"
+                        )}>
+                          {item?.quantity || 0} {item?.saleType === 'weight' ? 'kg' : 'u'} x {formatCurrency(item?.price || 0)}
+                        </p>
+                        <p className="font-bold text-zinc-900 dark:text-zinc-100">
+                          {formatCurrency(Math.round((item?.price || 0) * (item?.quantity || 0)))}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer / Total */}
+              <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-100 dark:border-zinc-700 shrink-0 flex flex-col gap-4">
+                {selectedTicket.isEmployeeSale && selectedTicket.items && (
+                  <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800/30 mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                        <span className="text-[10px] font-black">SAVE</span>
+                      </div>
+                      <span className="text-blue-700 dark:text-blue-400 font-bold text-sm">Ahorro Empleado Total:</span>
+                    </div>
+                    <span className="text-blue-800 dark:text-blue-300 font-black text-lg">
+                      {formatCurrency(
+                        selectedTicket.items.reduce((acc, item) => {
+                          const original = item.originalPrice || item.price || 0;
+                          const paid = item.price || 0;
+                          return acc + (Math.max(0, original - paid) * (item.quantity || 0));
+                        }, 0)
+                      )}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center w-full">
+                  <div className="text-zinc-500 font-medium">
+                    Total de artículos: <span className="font-bold text-zinc-900">{selectedTicket.items ? selectedTicket.items.reduce((acc, item) => acc + (item?.quantity || 0), 0) : 0}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-zinc-500 uppercase mb-1">Total Pagado</p>
+                    <p className={cn(
+                      "text-4xl font-black leading-none",
+                      selectedTicket.status === 'voided' ? "text-zinc-400 line-through" : "text-blue-600"
+                    )}>{formatCurrency(selectedTicket.total || 0)}</p>
+                  </div>
+                </div>
+                
+                {selectedTicket.status !== 'voided' && (
+                  <button 
+                    onClick={() => setIsVoidModalOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-rose-50 text-rose-600 rounded-[14px] font-black hover:bg-rose-100 transition-colors border border-rose-100"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                    ANULAR TICKET
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Void Reason Modal */}
+      <AnimatePresence>
+        {isVoidModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-[14px] shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-100 flex justify-between items-center bg-rose-50">
+                <div className="flex items-center gap-3 text-rose-600">
+                  <AlertCircle className="w-6 h-6" />
+                  <h3 className="text-xl font-black uppercase tracking-tight">Anular Ticket</h3>
+                </div>
+                <button onClick={() => setIsVoidModalOpen(false)} className="text-zinc-400 hover:text-rose-600">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <p className="text-zinc-600 font-medium">
+                  ¿Estás seguro de que deseas anular el ticket <span className="font-bold text-zinc-900">{selectedTicket?.id}</span>? Esta acción no se puede deshacer y el stock será devuelto al inventario.
+                </p>
+                
+                <div>
+                  <label className="block text-xs font-black text-zinc-500 uppercase mb-2 tracking-wider">Motivo de la Anulación</label>
+                  <textarea
+                    className="w-full p-4 bg-zinc-50 border border-zinc-200 rounded-[14px] focus:outline-none focus:ring-2 focus:ring-rose-500 transition-all text-zinc-700 font-medium resize-none h-32"
+                    placeholder="Ej: Error en el cobro, el cliente se arrepintió, etc..."
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                  />
+                </div>
+              </div>
+              
+              <div className="p-6 bg-zinc-50 flex gap-3">
+                <button
+                  onClick={() => setIsVoidModalOpen(false)}
+                  className="flex-1 py-4 bg-white border border-zinc-200 rounded-[14px] font-bold text-zinc-600 hover:bg-zinc-100 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleVoid}
+                  disabled={!voidReason.trim() || isVoiding}
+                  className="flex-1 py-4 bg-rose-600 text-white rounded-[14px] font-black hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200 disabled:opacity-50 disabled:shadow-none"
+                >
+                  {isVoiding ? 'Anulando...' : 'CONFIRMAR ANULACIÓN'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      </div>
+
+      {/* Hidden layout specifically for printing ticket copy */}
+      <div className="hidden print:block absolute top-0 left-0 w-[80mm] h-auto bg-white m-0 p-0 text-left border-none shadow-none z-max print:visible">
+        {selectedTicket && <PrintTicket sale={selectedTicket} companySettings={companySettings} />}
+      </div>
+    </>
+  );
+};
